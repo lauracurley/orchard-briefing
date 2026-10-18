@@ -43,6 +43,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
   const browserRecognition = useRef<BrowserRecognition | null>(null);
   const dictationWanted = useRef(false);
   const dictationRestart = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dictationStartTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [ready, setReady] = useState(false);
   const [note, setNote] = useState('');
@@ -103,6 +104,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
       if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
       dictationWanted.current = false;
       if (dictationRestart.current) clearTimeout(dictationRestart.current);
+      if (dictationStartTimer.current) clearTimeout(dictationStartTimer.current);
       browserRecognition.current?.stop();
     };
   }, []);
@@ -125,6 +127,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
     if (dictationWanted.current) {
       dictationWanted.current = false;
       if (dictationRestart.current) clearTimeout(dictationRestart.current);
+      if (dictationStartTimer.current) clearTimeout(dictationStartTimer.current);
       browserRecognition.current?.stop();
       setDictating(false);
       setDictationMessage('Stopped. Check the words in your note.');
@@ -132,11 +135,15 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
     }
     const speechWindow = window as typeof window & { SpeechRecognition?: new () => BrowserRecognition; webkitSpeechRecognition?: new () => BrowserRecognition };
     const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-    if (!Recognition) { setDictationMessage('Dictation is not available in this browser. Try Chrome, or type your note.'); return; }
+    if (!Recognition) { setDictationMessage('Dictation is not available here. Click the note and use your device’s dictation key, or open the site in Chrome.'); return; }
     setDictationMessage('Starting microphone…');
     const recognition = new Recognition();
     recognition.lang = 'en-US'; recognition.interimResults = false; recognition.continuous = true;
-    recognition.onstart = () => { if (browserRecognition.current === recognition && dictationWanted.current) setDictationMessage('Listening. Speak now, then press Stop dictating.'); };
+    recognition.onstart = () => {
+      if (browserRecognition.current !== recognition) return;
+      if (dictationStartTimer.current) clearTimeout(dictationStartTimer.current);
+      if (dictationWanted.current) setDictationMessage('Listening. Speak now, then press Stop dictating.');
+    };
     recognition.onresult = (event) => {
       if (browserRecognition.current !== recognition) return;
       const transcript = Array.from(event.results).slice(event.resultIndex).filter((result) => result.isFinal).map((result) => result[0]?.transcript ?? '').join(' ').trim();
@@ -147,6 +154,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
     };
     recognition.onerror = (event) => {
       if (browserRecognition.current !== recognition) return;
+      if (dictationStartTimer.current) clearTimeout(dictationStartTimer.current);
       if (event.error === 'no-speech') { setDictationMessage('Still listening. Speak now, or press Stop dictating.'); return; }
       if (event.error === 'aborted' && !dictationWanted.current) return;
       dictationWanted.current = false;
@@ -154,7 +162,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
       const message = event.error === 'not-allowed' || event.error === 'service-not-allowed'
         ? 'Microphone or speech recognition was blocked. Allow access in your browser, or try Chrome.'
         : event.error === 'audio-capture' ? 'No microphone was available. Check your microphone, or type your note.'
-          : event.error === 'network' ? 'The browser’s speech service could not connect. Try Chrome, or type your note.'
+          : event.error === 'network' ? 'This browser’s speech service could not connect. Click the note and use your device’s dictation key, or open the site in Chrome.'
             : 'Dictation stopped (' + event.error + '). Try Chrome, or type your note.';
       setDictationMessage(message);
     };
@@ -164,21 +172,30 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
       setDictationMessage('Listening again. Speak now, or press Stop dictating.');
       dictationRestart.current = setTimeout(() => {
         if (!dictationWanted.current) return;
-        try { recognition.start(); } catch {
-          dictationWanted.current = false;
-          browserRecognition.current = null;
-          setDictating(false);
-          setDictationMessage('Dictation could not continue here. Try Chrome, or type your note.');
-        }
+        startRecognition('Dictation could not continue here. Try Chrome, or type your note.');
       }, 250);
     };
+    function startRecognition(failure: string) {
+      try {
+        recognition.start();
+        dictationStartTimer.current = setTimeout(() => {
+          if (!dictationWanted.current || browserRecognition.current !== recognition) return;
+          dictationWanted.current = false;
+          recognition.stop();
+          setDictating(false);
+          setDictationMessage('The microphone did not start. Check browser permission, or click the note and use your device’s dictation key.');
+        }, 15000);
+      } catch {
+        dictationWanted.current = false;
+        browserRecognition.current = null;
+        setDictating(false);
+        setDictationMessage(failure);
+      }
+    }
     browserRecognition.current = recognition;
     dictationWanted.current = true;
-    try { recognition.start(); setDictating(true); } catch {
-      dictationWanted.current = false;
-      browserRecognition.current = null;
-      setDictationMessage('Dictation could not start here. Try Chrome, or type your note.');
-    }
+    setDictating(true);
+    startRecognition('Dictation could not start here. Try Chrome, or type your note.');
   }
 
   function loadSample() {
@@ -363,7 +380,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
         <section className="note-panel" id="new-note" aria-labelledby="note-heading"><div className="step">STEP 1 OF 2 · FIELD NOTE</div><h3 id="note-heading">What did you notice?</h3><p>Get the rough details down. You’ll make them clear in the next step.</p>
           {captureEnabled && <div className="record-row"><button type="button" className={recording ? 'record-button recording' : 'record-button'} onClick={recording ? stopRecording : startRecording} disabled={!ready || transcribing}>{recording ? '■  Stop recording' : '●  Record a note'}</button><span>Up to {MAX_NOTE_SECONDS} seconds</span></div>}
           {captureEnabled && clip && <button type="button" className="inline-button" onClick={transcribe} disabled={transcribing}>{transcribing ? 'Turning speech into text…' : 'Turn recording into text →'}</button>}
-          <div className="note-label-row"><label htmlFor="rough-note">Your note</label><button type="button" className={dictating ? 'record-button recording' : 'record-button'} onClick={toggleDictation} aria-pressed={dictating}>{dictating ? '■  Stop dictating' : '🎙  Start dictating'}</button></div><textarea id="rough-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={1500} rows={5} placeholder="What happened? Where? When does it need attention?"/><p className="dictation-help">Press Start, speak, then press Stop. Your browser may process speech online. You can always type instead.</p>{dictationMessage && <p className="dictation-status" role="status">{dictationMessage}</p>}
+          <div className="note-label-row"><label htmlFor="rough-note">Your note</label><button type="button" className={dictating ? 'record-button recording' : 'record-button'} onClick={toggleDictation} aria-pressed={dictating}>{dictating ? '■  Stop dictating' : '🎙  Start dictating'}</button></div><textarea id="rough-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={1500} rows={5} placeholder="What happened? Where? When does it need attention?"/><p className="dictation-help">Press Start, speak, then press Stop. If it cannot connect, click in the note and use your device’s dictation key (Mac: Fn-D; iPhone: keyboard microphone). You can always type instead.</p>{dictationMessage && <p className="dictation-status" role="status">{dictationMessage}</p>}
           <div className="note-actions"><button type="button" className="inline-button" onClick={loadSample}>See a sample note and task →</button>{captureEnabled && <button type="button" className="secondary" onClick={suggestTask} disabled={!ready || !note.trim() || agentStatus === 'connecting' || agentStatus === 'working' || conversation.status === 'connected'}>{agentStatus === 'connecting' || agentStatus === 'working' ? 'Preparing a task…' : 'Make a clear task →'}</button>}</div>
           <button type="button" className="continue-button" onClick={() => document.getElementById('title')?.focus()} disabled={!note.trim()}>Next: make a clear task →</button>
           {agentMessage && <div className="agent-message" role="status">{agentMessage}</div>}
