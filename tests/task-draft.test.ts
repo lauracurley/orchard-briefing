@@ -5,7 +5,7 @@ import { readTranscript, validateAudio } from '../src/lib/voice-note';
 
 test('agent draft keeps unknown species blank and does not invent missing details', () => {
   assert.deepEqual(parseAgentDraft({ title: '  Check   guards  ', species: 'Oak' }), {
-    title: 'Check guards', species: '', location: '', doneWhen: '',
+    title: 'Check guards', species: '', location: '', materialsLocation: '', doneWhen: '',
   });
 });
 
@@ -13,6 +13,7 @@ test('agent draft rejects missing or oversized instructions', () => {
   assert.throws(() => parseAgentDraft({ species: 'Hazel' }));
   assert.throws(() => parseAgentDraft({ title: 'x'.repeat(121) }));
   assert.throws(() => parseAgentDraft({ title: 'Check guards', location: 'x'.repeat(61) }));
+  assert.throws(() => parseAgentDraft({ title: 'Check guards', materialsLocation: 'x'.repeat(161) }));
 });
 
 test('recording validation accepts a short clip and rejects unexpected files', () => {

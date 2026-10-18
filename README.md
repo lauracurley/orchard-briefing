@@ -1,6 +1,6 @@
 # Orchard Briefing
 
-A small field-note and work-list demo for nut orchards. Record a rough note, review a clear task, and hear the open work before heading into the rows.
+A small field-note and work-list demo for nut orchards. Record a rough note, review a clear task, edit it when plans change, and hear the open work before heading into the rows.
 
 **Live demo:** https://orchard-briefing.vercel.app/
 
@@ -14,7 +14,7 @@ The public demo uses fictional orchard data. Lists are scoped to a random ID in 
 - ElevenAgents Chat Mode for a proposed task and one follow-up question when a note is unclear
 - ElevenLabs text-to-speech for the approved open-task briefing
 
-The grower reviews and approves every proposed task before the GraphQL mutation saves it. The agent can only populate an editable form through a client tool; it has no database write tool. Raw recordings and transcripts are not persisted. The server keeps ElevenLabs keys private. The [agent configuration](docs/elevenlabs-agent.md) documents its prompt, client tool, and approval boundary.
+The grower reviews and approves every proposed task before the GraphQL mutation saves it. Each task can have separate work and materials locations, and can be edited later. The agent can only populate an editable form through a client tool; it has no database write tool. Raw recordings and transcripts are not persisted. The server keeps ElevenLabs keys private. The [agent configuration](docs/elevenlabs-agent.md) documents its prompt, client tool, and approval boundary.
 
 The capture/agent flow is **off by default**. With it off, visitors can inspect a sample note and task, edit tasks, and use the existing spoken briefing. Turning it on requires the separate Scribe and ElevenAgents keys, an agent ID, and an explicit environment flag. Automated tests use no ElevenLabs credits.
 

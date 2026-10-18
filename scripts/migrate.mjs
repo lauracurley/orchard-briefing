@@ -20,6 +20,7 @@ await sql`CREATE TABLE IF NOT EXISTS tasks (
 await sql`CREATE INDEX IF NOT EXISTS tasks_orchard_id_idx ON tasks (orchard_id, id)`;
 await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS location text`;
 await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when text`;
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS materials_location text`;
 await sql`CREATE TABLE IF NOT EXISTS voice_requests (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   orchard_id uuid NOT NULL REFERENCES orchards(id) ON DELETE CASCADE,

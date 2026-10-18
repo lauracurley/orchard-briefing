@@ -6,10 +6,11 @@ import { SPECIES, type Species } from '@/lib/briefing';
 import { parseAgentDraft } from '@/lib/task-draft';
 import { MAX_NOTE_SECONDS } from '@/lib/voice-note';
 
-type Task = { id: string; species: Species; title: string; location: string | null; doneWhen: string | null; done: boolean };
+type Task = { id: string; species: Species; title: string; location: string | null; materialsLocation: string | null; doneWhen: string | null; done: boolean };
+type TaskForm = { species: Species | ''; title: string; location: string; materialsLocation: string; doneWhen: string };
 type AgentStatus = 'idle' | 'connecting' | 'working' | 'question' | 'ready';
 
-const TASK_FIELDS = 'id species title location doneWhen done';
+const TASK_FIELDS = 'id species title location materialsLocation doneWhen done';
 const SAMPLE_NOTE = 'The guards in the west chestnut rows looked loose after last night’s wind. Check them before lunch.';
 
 async function query<T>(source: string, variables: Record<string, unknown>): Promise<T> {
@@ -42,8 +43,12 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
   const [species, setSpecies] = useState<Species | ''>('');
   const [title, setTitle] = useState('');
   const [location, setLocation] = useState('');
+  const [materialsLocation, setMaterialsLocation] = useState('');
   const [doneWhen, setDoneWhen] = useState('');
   const [saving, setSaving] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editDraft, setEditDraft] = useState<TaskForm>({ species: '', title: '', location: '', materialsLocation: '', doneWhen: '' });
+  const [editSaving, setEditSaving] = useState(false);
   const [speaking, setSpeaking] = useState(false);
   const [error, setError] = useState('');
 
@@ -59,6 +64,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
         setTitle(draft.title);
         setSpecies(draft.species);
         setLocation(draft.location);
+        setMaterialsLocation(draft.materialsLocation);
         setDoneWhen(draft.doneWhen);
         setAgentStatus('ready');
         setAgentMessage('Here is a draft. Check every detail before adding it to the list.');
@@ -84,7 +90,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
   }, []);
 
   const open = tasks.filter((task) => !task.done);
-  const currentAudioKey = JSON.stringify(open.map(({ id, species: tree, title: taskTitle, location: place, doneWhen: criterion }) => [id, tree, taskTitle, place, criterion]));
+  const currentAudioKey = JSON.stringify(open.map(({ id, species: tree, title: taskTitle, location: place, materialsLocation: supplies, doneWhen: criterion }) => [id, tree, taskTitle, place, supplies, criterion]));
 
   function loadSample() {
     setNote(SAMPLE_NOTE);
@@ -92,6 +98,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
     setSpecies('Chestnut');
     setTitle('Check tree guards before lunch');
     setLocation('West chestnut rows');
+    setMaterialsLocation('Tree guards in the north shed');
     setDoneWhen('');
     setAgentStatus('ready');
     setAgentMessage('Sample task filled in. Check the details, then add what counts as done.');
@@ -179,11 +186,11 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
     setSaving(true); setError('');
     try {
       const data = await query<{ addTask: Task }>(
-        'mutation Add($orchardId: ID!, $species: String!, $title: String!, $location: String, $doneWhen: String) { addTask(orchardId: $orchardId, species: $species, title: $title, location: $location, doneWhen: $doneWhen) { ' + TASK_FIELDS + ' } }',
-        { orchardId: orchardId.current, species, title, location, doneWhen },
+        'mutation Add($orchardId: ID!, $species: String!, $title: String!, $location: String, $materialsLocation: String, $doneWhen: String) { addTask(orchardId: $orchardId, species: $species, title: $title, location: $location, materialsLocation: $materialsLocation, doneWhen: $doneWhen) { ' + TASK_FIELDS + ' } }',
+        { orchardId: orchardId.current, species, title, location, materialsLocation, doneWhen },
       );
       setTasks((previous) => [data.addTask, ...previous]);
-      setTitle(''); setSpecies(''); setLocation(''); setDoneWhen(''); setNote('');
+      setTitle(''); setSpecies(''); setLocation(''); setMaterialsLocation(''); setDoneWhen(''); setNote('');
       setAgentMessage(''); setAgentStatus('idle'); conversation.endSession();
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not add task.'); }
     finally { setSaving(false); }
@@ -198,6 +205,27 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
       );
       setTasks((previous) => previous.map((item) => item.id === task.id ? data.setTaskDone : item));
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not update task.'); }
+  }
+
+  function beginEdit(task: Task) {
+    setEditingId(task.id);
+    setEditDraft({ species: task.species, title: task.title, location: task.location ?? '', materialsLocation: task.materialsLocation ?? '', doneWhen: task.doneWhen ?? '' });
+    setError('');
+  }
+
+  async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingId || !editDraft.species || !editDraft.title.trim()) return;
+    setEditSaving(true); setError('');
+    try {
+      const data = await query<{ updateTask: Task }>(
+        'mutation Edit($orchardId: ID!, $taskId: ID!, $species: String!, $title: String!, $location: String, $materialsLocation: String, $doneWhen: String) { updateTask(orchardId: $orchardId, taskId: $taskId, species: $species, title: $title, location: $location, materialsLocation: $materialsLocation, doneWhen: $doneWhen) { ' + TASK_FIELDS + ' } }',
+        { orchardId: orchardId.current, taskId: editingId, ...editDraft },
+      );
+      setTasks((previous) => previous.map((item) => item.id === editingId ? data.updateTask : item));
+      setEditingId(null);
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save task.'); }
+    finally { setEditSaving(false); }
   }
 
   async function listen() {
@@ -238,13 +266,37 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
         <section className="draft-panel" aria-labelledby="draft-heading"><div className="step">02 / CHECK THE TASK</div><h3 id="draft-heading">Make it clear for the next person.</h3><p>Check every detail. Leave anything uncertain blank until you know.</p><form onSubmit={addTask}>
           <label htmlFor="species">Tree</label><select id="species" value={species} onChange={(event) => setSpecies(event.target.value as Species | '')} required><option value="">Choose a tree</option>{SPECIES.map((item) => <option key={item}>{item}</option>)}</select>
           <label htmlFor="title">What needs doing?</label><input id="title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Check the tree guards" required/>
-          <label htmlFor="location">Where?</label><input id="location" value={location} onChange={(event) => setLocation(event.target.value)} maxLength={60} placeholder="West chestnut rows"/>
+          <label htmlFor="location">Where is the work?</label><input id="location" value={location} onChange={(event) => setLocation(event.target.value)} maxLength={60} placeholder="West chestnut rows"/>
+          <label htmlFor="materials-location">Where are the materials?</label><input id="materials-location" value={materialsLocation} onChange={(event) => setMaterialsLocation(event.target.value)} maxLength={160} placeholder="Tree guards in the north shed"/>
           <label htmlFor="done-when">How will you know it’s done?</label><input id="done-when" value={doneWhen} onChange={(event) => setDoneWhen(event.target.value)} maxLength={120} placeholder="Every guard is checked"/>
           <button className="secondary save-button" type="submit" disabled={!ready || saving || !species || !title.trim()}>{saving ? 'Adding…' : 'Approve and add to list →'}</button>
         </form></section>
       </div>
       <section className="today" id="today" aria-labelledby="today-heading"><div className="today-heading"><div><p className="eyebrow">03 / TODAY’S WORK</p><h2 id="today-heading">Ready for the rows.</h2><p>A short list you can read here or hear before heading out. Once made, the same recording plays again while the list stays the same.</p></div><button className="primary listen-button" type="button" onClick={listen} disabled={!ready || speaking || !open.length}>{speaking ? 'Preparing audio…' : '▶  Hear today’s work'}</button></div>
-        <div className="task-list">{!ready && <p className="empty">Loading today’s work…</p>}{ready && !tasks.length && <p className="empty">Add a task to start your list.</p>}{tasks.map((task) => <label className={task.done ? 'task done' : 'task'} key={task.id}><input type="checkbox" checked={task.done} onChange={() => toggle(task)}/><span className="custom-check" aria-hidden="true"/><span className="task-text"><span className="species">{task.species}{task.location ? ' · ' + task.location : ''}</span><strong>{task.title}</strong>{task.doneWhen && <small>Done when: {task.doneWhen}</small>}</span></label>)}</div>
+        <div className="task-list">
+          {!ready && <p className="empty">Loading today’s work…</p>}
+          {ready && !tasks.length && <p className="empty">Add a task to start your list.</p>}
+          {tasks.map((task) => <div className={task.done ? 'task done' : 'task'} key={task.id}>
+            <div className="task-row">
+              <label className="task-check" htmlFor={'done-' + task.id}>
+                <input id={'done-' + task.id} type="checkbox" checked={task.done} onChange={() => toggle(task)}/>
+                <span className="custom-check" aria-hidden="true"/>
+                <span className="task-text"><span className="species">{task.species}{task.location ? ' · ' + task.location : ''}</span><strong>{task.title}</strong>{task.materialsLocation && <small>Materials: {task.materialsLocation}</small>}{task.doneWhen && <small>Done when: {task.doneWhen}</small>}</span>
+              </label>
+              <button className="edit-button" type="button" onClick={() => beginEdit(task)} aria-label={'Edit ' + task.title}>Edit</button>
+            </div>
+            {editingId === task.id && <form className="task-edit-form" onSubmit={saveEdit} aria-label={'Edit ' + task.title}>
+              <div className="task-edit-grid">
+                <label>Tree<select value={editDraft.species} onChange={(event) => setEditDraft({ ...editDraft, species: event.target.value as Species | '' })} required><option value="">Choose a tree</option>{SPECIES.map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label>What needs doing?<input value={editDraft.title} onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} maxLength={120} required/></label>
+                <label>Where is the work?<input value={editDraft.location} onChange={(event) => setEditDraft({ ...editDraft, location: event.target.value })} maxLength={60} placeholder="West chestnut rows"/></label>
+                <label>Where are the materials?<input value={editDraft.materialsLocation} onChange={(event) => setEditDraft({ ...editDraft, materialsLocation: event.target.value })} maxLength={160} placeholder="Tree guards in the north shed"/></label>
+                <label>How will you know it’s done?<input value={editDraft.doneWhen} onChange={(event) => setEditDraft({ ...editDraft, doneWhen: event.target.value })} maxLength={120} placeholder="Every guard is checked"/></label>
+              </div>
+              <div className="task-edit-actions"><button type="button" className="cancel-button" onClick={() => setEditingId(null)} disabled={editSaving}>Cancel</button><button type="submit" className="secondary" disabled={editSaving || !editDraft.species || !editDraft.title.trim()}>{editSaving ? 'Saving…' : 'Save changes'}</button></div>
+            </form>}
+          </div>)}
+        </div>
       </section>
       {error && <p className="error" role="alert">{error}</p>}
     </section>

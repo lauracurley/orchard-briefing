@@ -1,5 +1,5 @@
 export type Species = 'Chestnut' | 'Walnut' | 'Heartnut' | 'Hazel';
-export type BriefingTask = { species: Species; title: string; location?: string | null; done_when?: string | null; done: boolean };
+export type BriefingTask = { species: Species; title: string; location?: string | null; materials_location?: string | null; done_when?: string | null; done: boolean };
 
 export const SPECIES: Species[] = ['Chestnut', 'Walnut', 'Heartnut', 'Hazel'];
 
@@ -27,8 +27,9 @@ export function makeBriefing(tasks: BriefingTask[]): string {
   const intro = `Your orchard has ${open.length} open ${open.length === 1 ? 'task' : 'tasks'} in this briefing.`;
   const items = open.map((task, index) => {
     const location = task.location ? ` in ${task.location}` : '';
+    const materials = task.materials_location ? ` Materials: ${task.materials_location.replace(/[.!?]+$/, '')}.` : '';
     const doneWhen = task.done_when ? ` Done when: ${task.done_when.replace(/[.!?]+$/, '')}.` : '';
-    return `${index + 1}. ${task.species}: ${task.title.replace(/[.!?]+$/, '')}${location}.${doneWhen}`;
+    return `${index + 1}. ${task.species}: ${task.title.replace(/[.!?]+$/, '')}${location}.${materials}${doneWhen}`;
   });
   return `${intro} ${items.join(' ')} You can mark each task complete when you are back from the field.`;
 }

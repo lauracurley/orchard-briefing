@@ -20,7 +20,7 @@ export async function POST(request: Request) {
 
   try {
     const sql = db();
-    const rows = await sql`SELECT species, title, location, done_when, done FROM tasks WHERE orchard_id = ${orchardId} ORDER BY id DESC LIMIT 20`;
+    const rows = await sql`SELECT species, title, location, materials_location, done_when, done FROM tasks WHERE orchard_id = ${orchardId} ORDER BY id DESC LIMIT 20`;
     if (!rows.length) return Response.json({ error: 'Add a task before listening.' }, { status: 400 });
     const text = makeBriefing(rows as BriefingTask[]);
     const key = briefingAudioKey(orchardId, text, voiceId);
