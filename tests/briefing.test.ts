@@ -19,7 +19,16 @@ test('task titles are normalized and bounded', () => {
 });
 
 test('briefing includes approved work and materials locations and completion detail', () => {
-  const text = makeBriefing([{ species: 'Chestnut', title: 'Check guards', location: 'West rows', materials_location: 'Guard bin beside the shed', done_when: 'Loose guards are noted', done: false }]);
+  const text = makeBriefing([
+    {
+      species: 'Chestnut',
+      title: 'Check guards',
+      location: 'West rows',
+      materials_location: 'Guard bin beside the shed',
+      done_when: 'Loose guards are noted',
+      done: false,
+    },
+  ]);
   assert.match(text, /Check guards in West rows/);
   assert.match(text, /Materials: Guard bin beside the shed/);
   assert.match(text, /Done when: Loose guards are noted/);

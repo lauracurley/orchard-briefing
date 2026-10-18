@@ -4,7 +4,9 @@ export const BRIEFING_MODEL = 'eleven_multilingual_v2';
 export const BRIEFING_FORMAT = 'mp3_44100_128';
 
 export function briefingAudioKey(orchardId: string, text: string, voiceId: string): string {
-  return createHash('sha256').update(JSON.stringify([orchardId, BRIEFING_MODEL, BRIEFING_FORMAT, voiceId, text])).digest('hex');
+  return createHash('sha256')
+    .update(JSON.stringify([orchardId, BRIEFING_MODEL, BRIEFING_FORMAT, voiceId, text]))
+    .digest('hex');
 }
 
 export class AudioQuotaError extends Error {}
@@ -28,8 +30,9 @@ export async function getOrCreateBriefingAudio(
   const cached = await store.load(key);
   if (cached !== null) return Buffer.from(cached, 'base64');
 
-  if (!await store.claim(key, options.owner)) {
-    const wait = options.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
+  if (!(await store.claim(key, options.owner))) {
+    const wait =
+      options.wait ?? ((ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms)));
     for (let attempt = 0; attempt < (options.maxWaits ?? 24); attempt++) {
       await wait(250);
       const ready = await store.load(key);
@@ -42,7 +45,10 @@ export async function getOrCreateBriefingAudio(
   let synthesized = false;
   try {
     quotaId = await store.reserveQuota();
-    if (!quotaId) throw new AudioQuotaError('Today’s listening limit has been reached. Please try again tomorrow.');
+    if (!quotaId)
+      throw new AudioQuotaError(
+        'Today’s listening limit has been reached. Please try again tomorrow.',
+      );
     const audio = Buffer.from(await synthesize());
     if (audio.length === 0) throw new Error('The voice service returned no audio.');
     synthesized = true;

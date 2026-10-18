@@ -48,4 +48,8 @@ await sql`CREATE TABLE IF NOT EXISTS briefing_audio_cache (
 )`;
 await sql`ALTER TABLE briefing_audio_cache ADD COLUMN IF NOT EXISTS orchard_id uuid REFERENCES orchards(id) ON DELETE CASCADE`;
 await sql`CREATE INDEX IF NOT EXISTS briefing_audio_cache_orchard_id_idx ON briefing_audio_cache (orchard_id, created_at DESC)`;
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS spanish jsonb`;
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS work_status text NOT NULL DEFAULT 'ready' CHECK (work_status IN ('ready', 'doing', 'blocked', 'done'))`;
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS help_note text NOT NULL DEFAULT ''`;
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS revision integer NOT NULL DEFAULT 1`;
 console.log('Database ready');

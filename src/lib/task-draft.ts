@@ -1,6 +1,12 @@
 import { cleanOptionalField, cleanTitle, isSpecies, type Species } from './briefing';
 
-export type TaskDraft = { species: Species | ''; title: string; location: string; materialsLocation: string; doneWhen: string };
+export type TaskDraft = {
+  species: Species | '';
+  title: string;
+  location: string;
+  materialsLocation: string;
+  doneWhen: string;
+};
 
 export function parseAgentDraft(value: unknown): TaskDraft {
   if (!value || typeof value !== 'object') throw new Error('The suggested task needs an action.');

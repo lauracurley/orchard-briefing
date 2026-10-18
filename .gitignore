@@ -6,3 +6,5 @@ next-env.d.ts
 *.tsbuildinfo
 .vercel/
 .DS_Store
+test-results/
+playwright-report/

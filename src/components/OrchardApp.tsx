@@ -1,339 +1,543 @@
 'use client';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  emptyDraft,
+  EXAMPLES,
+  type Language,
+  type WorkDraft,
+  type WorkStatus,
+  type WorkTask,
+} from '@/lib/work-order';
+import { loadTasks, query, TASK_FIELDS } from '@/lib/work-api';
+import TaskEditor from './TaskEditor';
+import TaskCard from './TaskCard';
+import SavedRecordings from './SavedRecordings';
 
-import { ConversationProvider, useConversation } from '@elevenlabs/react';
-import { useEffect, useRef, useState } from 'react';
-import { SPECIES, type Species } from '@/lib/briefing';
-import { parseAgentDraft } from '@/lib/task-draft';
-import { MAX_NOTE_SECONDS } from '@/lib/voice-note';
-
-type Task = { id: string; species: Species; title: string; location: string | null; materialsLocation: string | null; doneWhen: string | null; done: boolean };
-type TaskForm = { species: Species | ''; title: string; location: string; materialsLocation: string; doneWhen: string };
-type AgentStatus = 'idle' | 'connecting' | 'working' | 'question' | 'ready';
-type BriefingStatus = { currentCached: boolean; previousKey: string | null };
-const TASK_FIELDS = 'id species title location materialsLocation doneWhen done';
-const SAMPLE_NOTE = 'The guards in the west chestnut rows looked loose after last night’s wind. Check them before lunch.';
-
-async function query<T>(source: string, variables: Record<string, unknown>): Promise<T> {
-  const response = await fetch('/api/graphql', {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ query: source, variables }),
-  });
-  const payload = await response.json();
-  if (!response.ok || payload.errors?.length) throw new Error(payload.errors?.[0]?.message ?? payload.error ?? 'Something went wrong.');
-  return payload.data as T;
+type View = 'management' | 'worker';
+type Filter = 'all' | 'ready' | 'doing' | 'blocked' | 'done';
+const FILTERS = {
+  en: {
+    all: 'All tasks',
+    ready: 'Ready',
+    doing: 'In progress',
+    blocked: 'Needs help',
+    done: 'Done',
+  },
+  es: {
+    all: 'Todas',
+    ready: 'Pendientes',
+    doing: 'En curso',
+    blocked: 'Necesitan ayuda',
+    done: 'Terminadas',
+  },
+};
+function hasDraft(draft: WorkDraft) {
+  return !!(draft.note || draft.english.title || draft.taskId);
 }
 
-function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
-  const orchardId = useRef('');
-  const noteToSend = useRef('');
-  const mediaRecorder = useRef<MediaRecorder | null>(null);
-  const stream = useRef<MediaStream | null>(null);
-  const recordingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const audioRef = useRef<HTMLAudioElement>(null);
-  const audioUrl = useRef<string | null>(null);
-  const audioKey = useRef('');
-  const [tasks, setTasks] = useState<Task[]>([]);
+export default function OrchardApp() {
+  const [orchardId, setOrchardId] = useState('');
+  const [tasks, setTasks] = useState<WorkTask[]>([]);
+  const [view, setView] = useState<View>('management');
+  const [language, setLanguage] = useState<Language>('en');
+  const [filter, setFilter] = useState<Filter>('all');
   const [ready, setReady] = useState(false);
-  const [note, setNote] = useState('');
-  const [clip, setClip] = useState<File | null>(null);
-  const [recording, setRecording] = useState(false);
-  const [transcribing, setTranscribing] = useState(false);
-  const [agentStatus, setAgentStatus] = useState<AgentStatus>('idle');
-  const [agentMessage, setAgentMessage] = useState('');
-  const [reply, setReply] = useState('');
-  const [species, setSpecies] = useState<Species | ''>('');
-  const [title, setTitle] = useState('');
-  const [location, setLocation] = useState('');
-  const [materialsLocation, setMaterialsLocation] = useState('');
-  const [doneWhen, setDoneWhen] = useState('');
-  const [saving, setSaving] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<TaskForm>({ species: '', title: '', location: '', materialsLocation: '', doneWhen: '' });
-  const [editSaving, setEditSaving] = useState(false);
-  const [speaking, setSpeaking] = useState(false);
-  const [briefingStatus, setBriefingStatus] = useState<BriefingStatus | null>(null);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [notice, setNotice] = useState('');
+  const [draft, setDraft] = useState<WorkDraft>(emptyDraft);
+  const [editor, setEditor] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [editError, setEditError] = useState('');
+  const [busy, setBusy] = useState<string | null>(null);
+  const [storageReady, setStorageReady] = useState(false);
+  const channel = useRef<BroadcastChannel | null>(null);
+  const lastRequest = useRef(0);
+  const manager = view === 'management';
+  const lang: Language = manager ? 'en' : language;
+  const es = lang === 'es';
 
-  const conversation = useConversation({
-    textOnly: true,
-    onConnect: () => { setAgentStatus('working'); conversation.sendUserMessage('Turn this field note into one clear draft task: ' + noteToSend.current); },
-    onMessage: ({ role, message }) => { if (role === 'agent') { setAgentMessage(message); setAgentStatus((value) => value === 'ready' ? value : 'question'); } },
-    onError: () => { setAgentStatus('idle'); setError('Task suggestions are unavailable. You can write the task yourself.'); },
-    clientTools: {
-      proposeTask: (values: Record<string, unknown>) => {
-        let draft;
-        try { draft = parseAgentDraft(values); } catch { return 'Please provide a short action and keep each field within its limit.'; }
-        setTitle(draft.title);
-        setSpecies(draft.species);
-        setLocation(draft.location);
-        setMaterialsLocation(draft.materialsLocation);
-        setDoneWhen(draft.doneWhen);
-        setAgentStatus('ready');
-        setAgentMessage('Here is a draft. Check every detail before adding it to the list.');
-        return 'Draft displayed for review. The grower must approve it before it is saved.';
-      },
-    },
-  });
-
-  useEffect(() => {
-    const id = localStorage.getItem('orchard-briefing-id') ?? crypto.randomUUID();
-    localStorage.setItem('orchard-briefing-id', id);
-    orchardId.current = id;
-    query<{ startOrchard: Task[] }>(
-      'mutation Start($orchardId: ID!) { startOrchard(orchardId: $orchardId) { ' + TASK_FIELDS + ' } }',
-      { orchardId: id },
-    ).then((data) => setTasks(data.startOrchard)).catch((reason) => setError(reason.message)).finally(() => setReady(true));
-    return () => {
-      if (recordingTimer.current) clearTimeout(recordingTimer.current);
-      if (mediaRecorder.current?.state === 'recording') mediaRecorder.current.stop();
-      stream.current?.getTracks().forEach((track) => track.stop());
-      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
-    };
-  }, []);
-
-  const open = tasks.filter((task) => !task.done);
-  const currentAudioKey = JSON.stringify(open.map(({ id, species: tree, title: taskTitle, location: place, materialsLocation: supplies, doneWhen: criterion }) => [id, tree, taskTitle, place, supplies, criterion]));
-
-  useEffect(() => {
-    if (!ready) return;
-    let active = true;
-    setBriefingStatus(null);
-    fetch('/api/briefing/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orchardId: orchardId.current }) })
-      .then(async (response) => { if (!response.ok) throw new Error('Could not check recordings.'); return response.json() as Promise<BriefingStatus>; })
-      .then((status) => { if (active) setBriefingStatus(status); })
-      .catch(() => { if (active) setBriefingStatus(null); });
-    return () => { active = false; };
-  }, [ready, currentAudioKey]);
-
-  function loadSample() {
-    setNote(SAMPLE_NOTE);
-    setClip(null);
-    setSpecies('Chestnut');
-    setTitle('Check tree guards before lunch');
-    setLocation('West chestnut rows');
-    setMaterialsLocation('Tree guards in the north shed');
-    setDoneWhen('');
-    setAgentStatus('ready');
-    setAgentMessage('Sample task filled in. Check the details, then add what counts as done.');
-  }
-
-  async function startRecording() {
-    setError(''); setClip(null);
-    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-      setError('Recording is not supported here. You can type a note instead.'); return;
-    }
+  const refresh = useCallback(async (id: string, initialize = false) => {
+    const request = ++lastRequest.current;
+    setLoading(true);
     try {
-      const tracks = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.current = tracks;
-      const mimeType = ['audio/webm', 'audio/mp4', 'audio/ogg'].find((type) => MediaRecorder.isTypeSupported(type));
-      const recorder = mimeType ? new MediaRecorder(tracks, { mimeType }) : new MediaRecorder(tracks);
-      const chunks: BlobPart[] = [];
-      recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
-      recorder.onstop = () => {
-        tracks.getTracks().forEach((track) => track.stop());
-        stream.current = null;
-        const blob = new Blob(chunks, { type: recorder.mimeType });
-        if (blob.size > 100) {
-          const extension = recorder.mimeType.includes('mp4') ? 'mp4' : recorder.mimeType.includes('ogg') ? 'ogg' : 'webm';
-          setClip(new File([blob], 'field-note.' + extension, { type: recorder.mimeType }));
-        }
-        setRecording(false);
-      };
-      recorder.start();
-      mediaRecorder.current = recorder;
-      setRecording(true);
-      recordingTimer.current = setTimeout(() => { if (recorder.state === 'recording') recorder.stop(); }, MAX_NOTE_SECONDS * 1000);
-    } catch {
-      stream.current?.getTracks().forEach((track) => track.stop());
-      setError('Microphone access was not available. You can type a note instead.');
-    }
-  }
-
-  function stopRecording() {
-    if (recordingTimer.current) clearTimeout(recordingTimer.current);
-    if (mediaRecorder.current?.state === 'recording') mediaRecorder.current.stop();
-  }
-
-  async function transcribe() {
-    if (!clip) return;
-    setTranscribing(true); setError('');
-    try {
-      const form = new FormData();
-      form.set('orchardId', orchardId.current);
-      form.set('audio', clip);
-      const response = await fetch('/api/transcribe', { method: 'POST', body: form });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? 'Could not transcribe the note.');
-      setNote(payload.transcript);
-      setClip(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not transcribe the note.'); }
-    finally { setTranscribing(false); }
-  }
-
-  async function suggestTask() {
-    if (!note.trim() || !ready) return;
-    setError(''); setAgentMessage(''); setAgentStatus('connecting');
-    noteToSend.current = note.trim().slice(0, 1500);
-    try {
-      const response = await fetch('/api/agent-session', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orchardId: orchardId.current }),
-      });
-      const payload = await response.json();
-      if (!response.ok) throw new Error(payload.error ?? 'Task suggestions are unavailable.');
-      conversation.startSession({ signedUrl: payload.signedUrl, textOnly: true });
-    } catch (reason) {
-      setAgentStatus('idle');
-      setError(reason instanceof Error ? reason.message : 'Task suggestions are unavailable.');
-    }
-  }
-
-  function sendReply() {
-    if (!reply.trim() || conversation.status !== 'connected') return;
-    conversation.sendUserMessage(reply.trim());
-    setReply(''); setAgentStatus('working'); setAgentMessage('');
-  }
-
-  async function addTask(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!species || !title.trim()) return;
-    setSaving(true); setError('');
-    try {
-      const data = await query<{ addTask: Task }>(
-        'mutation Add($orchardId: ID!, $species: String!, $title: String!, $location: String, $materialsLocation: String, $doneWhen: String) { addTask(orchardId: $orchardId, species: $species, title: $title, location: $location, materialsLocation: $materialsLocation, doneWhen: $doneWhen) { ' + TASK_FIELDS + ' } }',
-        { orchardId: orchardId.current, species, title, location, materialsLocation, doneWhen },
-      );
-      setTasks((previous) => [data.addTask, ...previous]);
-      setTitle(''); setSpecies(''); setLocation(''); setMaterialsLocation(''); setDoneWhen(''); setNote('');
-      setAgentMessage(''); setAgentStatus('idle'); conversation.endSession();
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not add task.'); }
-    finally { setSaving(false); }
-  }
-
-  async function toggle(task: Task) {
-    setError('');
-    try {
-      const data = await query<{ setTaskDone: Task }>(
-        'mutation Done($orchardId: ID!, $taskId: ID!, $done: Boolean!) { setTaskDone(orchardId: $orchardId, taskId: $taskId, done: $done) { ' + TASK_FIELDS + ' } }',
-        { orchardId: orchardId.current, taskId: task.id, done: !task.done },
-      );
-      setTasks((previous) => previous.map((item) => item.id === task.id ? data.setTaskDone : item));
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not update task.'); }
-  }
-
-  function beginEdit(task: Task) {
-    setEditingId(task.id);
-    setEditDraft({ species: task.species, title: task.title, location: task.location ?? '', materialsLocation: task.materialsLocation ?? '', doneWhen: task.doneWhen ?? '' });
-    setError('');
-  }
-
-  async function saveEdit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!editingId || !editDraft.species || !editDraft.title.trim()) return;
-    setEditSaving(true); setError('');
-    try {
-      const data = await query<{ updateTask: Task }>(
-        'mutation Edit($orchardId: ID!, $taskId: ID!, $species: String!, $title: String!, $location: String, $materialsLocation: String, $doneWhen: String) { updateTask(orchardId: $orchardId, taskId: $taskId, species: $species, title: $title, location: $location, materialsLocation: $materialsLocation, doneWhen: $doneWhen) { ' + TASK_FIELDS + ' } }',
-        { orchardId: orchardId.current, taskId: editingId, ...editDraft },
-      );
-      setTasks((previous) => previous.map((item) => item.id === editingId ? data.updateTask : item));
-      setEditingId(null);
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not save task.'); }
-    finally { setEditSaving(false); }
-  }
-
-  async function listen() {
-    setSpeaking(true); setError('');
-    try {
-      if (audioUrl.current && audioKey.current === currentAudioKey && audioRef.current) {
-        await audioRef.current.play(); return;
+      const data = await loadTasks(id, initialize);
+      if (request === lastRequest.current) {
+        setTasks(data);
+        setError('');
+        setReady(true);
       }
-      const response = await fetch('/api/briefing', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orchardId: orchardId.current }),
-      });
-      if (!response.ok) { const payload = await response.json(); throw new Error(payload.error ?? 'Could not play the briefing.'); }
-      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
-      audioUrl.current = URL.createObjectURL(await response.blob());
-      audioKey.current = currentAudioKey;
-      setBriefingStatus((previous) => ({ currentCached: true, previousKey: previous?.previousKey ?? null }));
-      if (audioRef.current) { audioRef.current.src = audioUrl.current; await audioRef.current.play(); }
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not play the briefing.'); }
-    finally { setSpeaking(false); }
-  }
-
-  async function replayLast() {
-    setSpeaking(true); setError('');
+    } catch {
+      if (request === lastRequest.current)
+        setError('Could not load the work list. Your saved draft is safe. Please try Refresh.');
+    } finally {
+      if (request === lastRequest.current) setLoading(false);
+    }
+  }, []);
+  useEffect(() => {
+    let id = crypto.randomUUID() as string;
     try {
-      const response = await fetch('/api/briefing/last', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orchardId: orchardId.current, cacheKey: briefingStatus?.previousKey }) });
-      if (!response.ok) { const payload = await response.json(); throw new Error(payload.error ?? 'Could not play the saved recording.'); }
-      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
-      audioUrl.current = URL.createObjectURL(await response.blob());
-      audioKey.current = '';
-      if (audioRef.current) { audioRef.current.src = audioUrl.current; await audioRef.current.play(); }
-    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not play the saved recording.'); }
-    finally { setSpeaking(false); }
+      const saved = localStorage.getItem('orchard-briefing-id');
+      if (saved && /^[0-9a-f-]{36}$/i.test(saved)) id = saved;
+      localStorage.setItem('orchard-briefing-id', id);
+      const raw = localStorage.getItem('orchard-work-draft:' + id);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (parsed.english && parsed.spanish && typeof parsed.note === 'string') setDraft(parsed);
+      }
+      if (localStorage.getItem('orchard-language') === 'es') setLanguage('es');
+    } catch {
+      setNotice('Browser storage is unavailable. Keep this page open to retain your draft.');
+    }
+    setOrchardId(id);
+    setStorageReady(true);
+    function syncView() {
+      setView(window.location.hash === '#worker' ? 'worker' : 'management');
+      setFilter('all');
+    }
+    syncView();
+    window.addEventListener('hashchange', syncView);
+    void refresh(id, true);
+    if ('BroadcastChannel' in window) {
+      channel.current = new BroadcastChannel('orchard-work:' + id);
+      channel.current.onmessage = () => {
+        void refresh(id);
+      };
+    }
+    const onFocus = () => {
+      void refresh(id);
+    };
+    window.addEventListener('focus', onFocus);
+    return () => {
+      window.removeEventListener('hashchange', syncView);
+      window.removeEventListener('focus', onFocus);
+      channel.current?.close();
+    };
+  }, [refresh]);
+  useEffect(() => {
+    if (!storageReady) return;
+    try {
+      localStorage.setItem('orchard-work-draft:' + orchardId, JSON.stringify(draft));
+    } catch {
+      setNotice('Draft could not be saved on this device. Keep this page open until you publish.');
+    }
+  }, [draft, orchardId, storageReady]);
+  function chooseView(next: View) {
+    setNotice('');
+    window.location.hash = next;
+    setView(next);
+    setFilter('all');
+    if (orchardId) void refresh(orchardId);
   }
+  function chooseLanguage(next: Language) {
+    setNotice('');
+    setLanguage(next);
+    try {
+      localStorage.setItem('orchard-language', next);
+    } catch {
+      /* Selection still works for this visit. */
+    }
+  }
+  function openEditor(next?: WorkDraft) {
+    if (next && hasDraft(draft)) {
+      setNotice('You have a saved draft. Publish or discard it before starting another.');
+      setEditor(true);
+    } else {
+      if (next) setDraft(next);
+      setEditor(true);
+    }
+    setEditError('');
+    requestAnimationFrame(() =>
+      document
+        .getElementById('task-editor')
+        ?.scrollIntoView({ behavior: 'smooth', block: 'start' }),
+    );
+  }
+  function edit(task: WorkTask) {
+    openEditor({
+      taskId: task.id,
+      revision: task.revision,
+      species: task.species,
+      english: {
+        title: task.title,
+        location: task.location ?? '',
+        materialsLocation: task.materialsLocation ?? '',
+        doneWhen: task.doneWhen ?? '',
+      },
+      spanish: task.spanish ?? emptyDraft().spanish,
+      bilingual: !!task.spanish,
+      note: '',
+    });
+  }
+  function applyTask(task: WorkTask) {
+    ++lastRequest.current;
+    setLoading(false);
+    setTasks((previous) =>
+      previous.some((item) => item.id === task.id)
+        ? previous.map((item) => (item.id === task.id ? task : item))
+        : [task, ...previous],
+    );
+    channel.current?.postMessage('updated');
+  }
+  async function publish() {
+    setSaving(true);
+    setEditError('');
+    try {
+      const data = await query<{ saveTask: WorkTask }>(
+        'mutation Save($orchardId: ID!, $taskId: ID, $revision: Int, $input: WorkInput!) { saveTask(orchardId: $orchardId, taskId: $taskId, revision: $revision, input: $input) { ' +
+          TASK_FIELDS +
+          ' } }',
+        {
+          orchardId,
+          taskId: draft.taskId,
+          revision: draft.revision,
+          input: {
+            species: draft.species,
+            english: draft.english,
+            spanish: draft.bilingual ? draft.spanish : null,
+          },
+        },
+      );
+      applyTask(data.saveTask);
+      setDraft(emptyDraft());
+      setEditor(false);
+      setFilter('all');
+      setNotice('Published. The crew can now read these instructions in Worker view.');
+    } catch (reason) {
+      setEditError(
+        reason instanceof Error ? reason.message : 'Could not publish. Your draft has been kept.',
+      );
+    } finally {
+      setSaving(false);
+    }
+  }
+  async function changeStatus(task: WorkTask, status: WorkStatus, helpNote?: string) {
+    setBusy(task.id);
+    setError('');
+    try {
+      const data = await query<{ setWorkStatus: WorkTask }>(
+        'mutation Status($orchardId: ID!, $taskId: ID!, $revision: Int!, $status: String!, $helpNote: String) { setWorkStatus(orchardId: $orchardId, taskId: $taskId, revision: $revision, status: $status, helpNote: $helpNote) { ' +
+          TASK_FIELDS +
+          ' } }',
+        { orchardId, taskId: task.id, revision: task.revision, status, helpNote },
+      );
+      applyTask(data.setWorkStatus);
+      setNotice(
+        es
+          ? 'Estado actualizado. El encargado puede verlo.'
+          : 'Status updated. Management can see your progress.',
+      );
+      return true;
+    } catch (reason) {
+      setError(
+        es
+          ? 'No se pudo guardar. Actualiza la lista e inténtalo de nuevo.'
+          : reason instanceof Error
+            ? reason.message
+            : 'Could not save. Please try again.',
+      );
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+  const done = tasks.filter((t) => t.status === 'done').length;
+  const blocked = tasks.filter((t) => t.status === 'blocked').length;
+  const shown = tasks
+    .filter((t) => filter === 'all' || t.status === filter)
+    .sort((a, b) => (a.status === 'done' ? 1 : 0) - (b.status === 'done' ? 1 : 0));
 
-  const listenLabel = speaking ? 'Preparing audio…' : briefingStatus?.currentCached ? '▶  Play today’s recording' : '▶  Make today’s recording';
-
-  return <main>
-    <header className="topbar"><a className="brand" href="#top"><span className="brand-mark">◎</span> Orchard Briefing</a><a className="header-link" href="#today">Today’s work <span aria-hidden="true">↗</span></a></header>
-    <section className="hero" id="top">
-      <div className="hero-copy"><p className="eyebrow">A CLEAR START IN THE ORCHARD</p><h1>Know what needs doing <em>before you head out.</em></h1><p className="lede">Turn a quick field note into a clear task. Review it, add it to today’s work, and hear the list read aloud.</p><div className="hero-actions"><a className="primary" href="#new-note">Make a field note <span aria-hidden="true">→</span></a><a className="text-action" href="#today">Hear today’s work ↓</a></div></div>
-      <div className="hero-art" aria-hidden="true"><div className="sun"/><div className="hill hill-back"/><div className="hill hill-front"/><div className="tree tree-one"><i/><b/></div><div className="tree tree-two"><i/><b/></div><div className="tree tree-three"><i/><b/></div><div className="tree tree-four"><i/><b/></div><div className="art-label">CHESTNUT · WALNUT · HEARTNUT · HAZEL</div></div>
-    </section>
-    <section className="workspace" aria-label="Field work">
-      <div className="section-heading"><p className="eyebrow">FROM NOTE TO WORK LIST</p><h2>One note. One clear task.</h2><p>Write or dictate what you noticed, then turn it into instructions the crew can use.</p></div>
-      <div className="work-grid">
-        <section className="note-panel" id="new-note" aria-labelledby="note-heading"><div className="step">STEP 1 OF 2 · FIELD NOTE</div><h3 id="note-heading">What did you notice?</h3><p>Get the rough details down. You’ll make them clear in the next step.</p>
-          {captureEnabled && <div className="record-row"><button type="button" className={recording ? 'record-button recording' : 'record-button'} onClick={recording ? stopRecording : startRecording} disabled={!ready || transcribing}>{recording ? '■  Stop recording' : '●  Record a note'}</button><span>Up to {MAX_NOTE_SECONDS} seconds</span></div>}
-          {captureEnabled && clip && <button type="button" className="inline-button" onClick={transcribe} disabled={transcribing}>{transcribing ? 'Turning speech into text…' : 'Turn recording into text →'}</button>}
-          <label htmlFor="rough-note">Your note</label><textarea id="rough-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={1500} rows={5} placeholder="What happened? Where? When does it need attention?"/><p className="dictation-help">You can type or use your device’s dictation in this field (Mac: Fn-D; iPhone: keyboard microphone).</p>
-          <div className="note-actions"><button type="button" className="inline-button" onClick={loadSample}>See a sample note and task →</button>{captureEnabled && <button type="button" className="secondary" onClick={suggestTask} disabled={!ready || !note.trim() || agentStatus === 'connecting' || agentStatus === 'working' || conversation.status === 'connected'}>{agentStatus === 'connecting' || agentStatus === 'working' ? 'Preparing a task…' : 'Make a clear task →'}</button>}</div>
-          <button type="button" className="continue-button" onClick={() => document.getElementById('title')?.focus()} disabled={!note.trim()}>Next: make a clear task →</button>
-          {agentMessage && <div className="agent-message" role="status">{agentMessage}</div>}
-          {agentStatus === 'question' && conversation.status === 'connected' && <div className="reply-row"><label htmlFor="reply">Your answer</label><input id="reply" value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendReply(); }} placeholder="Add the missing detail"/><button type="button" className="inline-button" onClick={sendReply}>Send answer →</button></div>}
-        </section>
-        <section className="draft-panel" aria-labelledby="draft-heading"><div className="step">STEP 2 OF 2 · CLEAR TASK</div><h3 id="draft-heading">Make it clear for the crew.</h3><p>Use your note to write one action. Check every detail before adding it to the list.</p>{note.trim() && <div className="note-reference"><strong>Your note</strong><p>{note}</p></div>}<form onSubmit={addTask}>
-          <label htmlFor="species">Tree</label><select id="species" value={species} onChange={(event) => setSpecies(event.target.value as Species | '')} required><option value="">Choose a tree</option>{SPECIES.map((item) => <option key={item}>{item}</option>)}</select>
-          <label htmlFor="title">What needs doing?</label><input id="title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Check the tree guards" required/>
-          <label htmlFor="location">Where is the work?</label><input id="location" value={location} onChange={(event) => setLocation(event.target.value)} maxLength={60} placeholder="West chestnut rows"/>
-          <label htmlFor="materials-location">Where are the materials?</label><input id="materials-location" value={materialsLocation} onChange={(event) => setMaterialsLocation(event.target.value)} maxLength={160} placeholder="Tree guards in the north shed"/>
-          <label htmlFor="done-when">How will you know it’s done?</label><input id="done-when" value={doneWhen} onChange={(event) => setDoneWhen(event.target.value)} maxLength={120} placeholder="Every guard is checked"/>
-          <button className="secondary save-button" type="submit" disabled={!ready || saving || !species || !title.trim()}>{saving ? 'Adding…' : 'Approve and add to list →'}</button>
-        </form></section>
-      </div>
-      <section className="today" id="today" aria-labelledby="today-heading"><div className="today-heading"><div><p className="eyebrow">TODAY’S WORK</p><h2 id="today-heading">Ready for the rows.</h2><p>Read the current list here or hear it before heading out.</p></div><div className="listen-actions"><button className="primary listen-button" type="button" onClick={listen} disabled={!ready || !briefingStatus || speaking || !open.length}>{listenLabel}</button>{briefingStatus && !briefingStatus.currentCached && <small>Making a new recording uses the voice service and has a daily limit.</small>}{briefingStatus?.previousKey && <><button className="inline-button" type="button" onClick={replayLast} disabled={speaking}>▶  Replay earlier recording</button><small>It may describe an older list. Replaying does not make a new recording.</small></>}</div></div>
-        <div className="task-list">
-          {!ready && <p className="empty">Loading today’s work…</p>}
-          {ready && !tasks.length && <p className="empty">Add a task to start your list.</p>}
-          {tasks.map((task) => <div className={task.done ? 'task done' : 'task'} key={task.id}>
-            <div className="task-row">
-              <label className="task-check" htmlFor={'done-' + task.id}>
-                <input id={'done-' + task.id} type="checkbox" checked={task.done} onChange={() => toggle(task)}/>
-                <span className="custom-check" aria-hidden="true"/>
-                <span className="task-text"><span className="species">{task.species}{task.location ? ' · ' + task.location : ''}</span><strong>{task.title}</strong>{task.materialsLocation && <small>Materials: {task.materialsLocation}</small>}{task.doneWhen && <small>Done when: {task.doneWhen}</small>}</span>
-              </label>
-              <button className="edit-button" type="button" onClick={() => beginEdit(task)} aria-label={'Edit ' + task.title}>Edit</button>
+  return (
+    <div lang={lang}>
+      <a className="skip-link" href="#work-list">
+        {es ? 'Ir a las tareas' : 'Skip to tasks'}
+      </a>
+      <header className="topbar">
+        <a className="brand" href="#management" aria-label="Orchard Briefing home">
+          <svg width="30" height="34" viewBox="0 0 30 34" fill="none" aria-hidden="true">
+            <path d="M15 32V12M15 21L6 13M15 26L25 16" stroke="currentColor" strokeWidth="2" />
+            <path
+              d="M15 2C3 2 0 11 7 17C10 19 13 18 15 15C17 18 20 19 23 17C30 11 27 2 15 2Z"
+              fill="currentColor"
+              opacity=".2"
+            />
+          </svg>
+          <span>
+            Orchard<span className="brand-light">Briefing</span>
+          </span>
+        </a>
+        <nav className="view-nav" aria-label={es ? 'Vista del huerto' : 'Orchard view'}>
+          <button
+            className={manager ? 'selected' : ''}
+            aria-pressed={manager}
+            onClick={() => chooseView('management')}
+          >
+            {es ? 'Gestión' : 'Management'}
+          </button>
+          <button
+            className={!manager ? 'selected' : ''}
+            aria-pressed={!manager}
+            onClick={() => chooseView('worker')}
+          >
+            {es ? 'Equipo' : 'Worker'}
+          </button>
+        </nav>
+        <span className="demo-badge">{es ? 'Huerto de muestra' : 'Demo orchard'}</span>
+      </header>
+      <main className="app-shell">
+        <section className="intro">
+          <div>
+            <p className="eyebrow">
+              {manager
+                ? 'A CLEAR START FOR THE WHOLE CREW'
+                : es
+                  ? 'LAS INSTRUCCIONES, A MANO'
+                  : 'YOUR INSTRUCTIONS, AT HAND'}
+            </p>
+            <h1>
+              {manager ? (
+                <>
+                  Good work starts with
+                  <br />
+                  <em>clear instructions.</em>
+                </>
+              ) : es ? (
+                'El trabajo de hoy.'
+              ) : (
+                'Today’s work.'
+              )}
+            </h1>
+            <p>
+              {manager
+                ? 'Prepare the work in English and Spanish. Give your crew the details they need, and see how the day is going.'
+                : es
+                  ? 'Consulta dónde ir, qué llevar y cuándo está terminado. Avisa si necesitas ayuda.'
+                  : 'Know where to go, what to bring, and what finished looks like. Ask for help when you need it.'}
+            </p>
+          </div>
+          {manager ? (
+            <div className="intro-action">
+              <button className="primary" disabled={!ready} onClick={() => openEditor()}>
+                {hasDraft(draft) ? 'Continue draft' : '+ New task'}
+              </button>
+              <button
+                className="text-button"
+                disabled={!ready}
+                onClick={() => openEditor(structuredClone(EXAMPLES[0]))}
+              >
+                Try a bilingual example →
+              </button>
             </div>
-            {editingId === task.id && <form className="task-edit-form" onSubmit={saveEdit} aria-label={'Edit ' + task.title}>
-              <div className="task-edit-grid">
-                <label>Tree<select value={editDraft.species} onChange={(event) => setEditDraft({ ...editDraft, species: event.target.value as Species | '' })} required><option value="">Choose a tree</option>{SPECIES.map((item) => <option key={item}>{item}</option>)}</select></label>
-                <label>What needs doing?<input value={editDraft.title} onChange={(event) => setEditDraft({ ...editDraft, title: event.target.value })} maxLength={120} required/></label>
-                <label>Where is the work?<input value={editDraft.location} onChange={(event) => setEditDraft({ ...editDraft, location: event.target.value })} maxLength={60} placeholder="West chestnut rows"/></label>
-                <label>Where are the materials?<input value={editDraft.materialsLocation} onChange={(event) => setEditDraft({ ...editDraft, materialsLocation: event.target.value })} maxLength={160} placeholder="Tree guards in the north shed"/></label>
-                <label>How will you know it’s done?<input value={editDraft.doneWhen} onChange={(event) => setEditDraft({ ...editDraft, doneWhen: event.target.value })} maxLength={120} placeholder="Every guard is checked"/></label>
+          ) : (
+            <div
+              className="language-control"
+              role="group"
+              aria-label={es ? 'Idioma de las instrucciones' : 'Instructions language'}
+            >
+              <span>{es ? 'Tu idioma' : 'Your language'}</span>
+              <div>
+                <button
+                  aria-pressed={language === 'en'}
+                  className={language === 'en' ? 'selected' : ''}
+                  onClick={() => chooseLanguage('en')}
+                >
+                  English
+                </button>
+                <button
+                  aria-pressed={language === 'es'}
+                  className={language === 'es' ? 'selected' : ''}
+                  onClick={() => chooseLanguage('es')}
+                >
+                  Español
+                </button>
               </div>
-              <div className="task-edit-actions"><button type="button" className="cancel-button" onClick={() => setEditingId(null)} disabled={editSaving}>Cancel</button><button type="submit" className="secondary" disabled={editSaving || !editDraft.species || !editDraft.title.trim()}>{editSaving ? 'Saving…' : 'Save changes'}</button></div>
-            </form>}
-          </div>)}
+            </div>
+          )}
+        </section>
+        <div className="preview-bar">
+          <span aria-hidden="true">◖))</span>
+          <p>
+            {es
+              ? 'Vista previa: las nuevas grabaciones están en pausa. Puedes leer las tareas y actualizar su estado.'
+              : 'New recordings are paused for this preview. All text features are ready to try.'}
+          </p>
         </div>
-      </section>
-      {error && <p className="error" role="alert">{error}</p>}
-    </section>
-    <footer><span>Made for the quiet work of growing nut trees.</span><span>Fictional demo · Lists stay with this browser · Powered by <a href="https://elevenlabs.io" target="_blank" rel="noreferrer">ElevenLabs</a></span></footer>
-    <audio ref={audioRef} controls className="audio" aria-label="Spoken orchard briefing"/>
-  </main>;
-}
-
-export default function OrchardApp({ captureEnabled }: { captureEnabled: boolean }) {
-  return <ConversationProvider><HomeContent captureEnabled={captureEnabled}/></ConversationProvider>;
+        {notice && (
+          <div className="notice" role="status">
+            <span>{notice}</span>
+            <button
+              className="quiet"
+              aria-label={es ? 'Cerrar aviso' : 'Dismiss notice'}
+              onClick={() => setNotice('')}
+            >
+              ×
+            </button>
+          </div>
+        )}
+        {manager && (
+          <div id="task-editor">
+            {editor && (
+              <TaskEditor
+                key={draft.taskId ?? 'new'}
+                draft={draft}
+                onChange={setDraft}
+                onClose={() => setEditor(false)}
+                onDiscard={() => {
+                  setDraft(emptyDraft());
+                  setEditor(false);
+                  setNotice('Draft discarded. Published tasks are unchanged.');
+                }}
+                onPublish={publish}
+                saving={saving}
+                error={editError}
+              />
+            )}
+          </div>
+        )}
+        <section id="work-list" className="work-section" aria-labelledby="work-title">
+          <div className="section-top">
+            <div>
+              <p className="eyebrow">
+                {manager ? 'THE CREW’S WORK LIST' : es ? 'PASO A PASO' : 'ONE TASK AT A TIME'}
+              </p>
+              <h2 id="work-title">
+                {manager
+                  ? 'Today, in the orchard.'
+                  : es
+                    ? 'Listo para empezar.'
+                    : 'Ready for the rows.'}
+              </h2>
+            </div>
+            <button
+              className="quiet refresh"
+              disabled={loading || !orchardId}
+              onClick={() => refresh(orchardId, !ready)}
+            >
+              {loading ? (es ? 'Cargando…' : 'Loading…') : es ? '↻ Actualizar' : '↻ Refresh'}
+            </button>
+          </div>
+          {manager && (
+            <div className="overview">
+              <div>
+                <strong>{tasks.length - done}</strong>
+                <span>Still to do</span>
+              </div>
+              <div>
+                <strong>
+                  {done}
+                  <small> / {tasks.length}</small>
+                </strong>
+                <span>Completed</span>
+              </div>
+              <button className={blocked ? 'has-blocked' : ''} onClick={() => setFilter('blocked')}>
+                <strong>{blocked}</strong>
+                <span>
+                  Need a hand <span aria-hidden="true">↗</span>
+                </span>
+              </button>
+              <div className="progress-summary">
+                <span>A little progress, every day.</span>
+                <progress value={done} max={tasks.length || 1} aria-label="Tasks completed" />
+              </div>
+            </div>
+          )}
+          <div className="filters" role="group" aria-label={es ? 'Filtrar tareas' : 'Filter tasks'}>
+            {(Object.keys(FILTERS[lang]) as Filter[]).map((key) => (
+              <button
+                key={key}
+                className={filter === key ? 'selected' : ''}
+                aria-pressed={filter === key}
+                onClick={() => setFilter(key)}
+              >
+                {FILTERS[lang][key]}
+                <span>
+                  {key === 'all' ? tasks.length : tasks.filter((t) => t.status === key).length}
+                </span>
+              </button>
+            ))}
+          </div>
+          {error && (
+            <p className="error" role="alert">
+              {es && error.startsWith('Could not load')
+                ? 'No se pudo cargar la lista. Pulsa Actualizar para intentarlo de nuevo.'
+                : error}
+            </p>
+          )}
+          {!ready && (
+            <div className="empty-state">
+              <h3>
+                {loading
+                  ? es
+                    ? 'Cargando el trabajo…'
+                    : 'Getting the work list…'
+                  : es
+                    ? 'No se pudo cargar la lista.'
+                    : 'The work list could not be loaded.'}
+              </h3>
+              <p>
+                {es
+                  ? 'Tus cambios se guardan al publicar.'
+                  : 'Published work is saved in your demo workspace.'}
+              </p>
+            </div>
+          )}
+          {ready && !shown.length && (
+            <div className="empty-state">
+              <span aria-hidden="true">✓</span>
+              <h3>{es ? 'No hay tareas en esta vista.' : 'No tasks in this view.'}</h3>
+              <p>
+                {es
+                  ? 'Selecciona Todas para ver la lista completa.'
+                  : 'Choose All tasks to see the whole list, or prepare a new task.'}
+              </p>
+            </div>
+          )}
+          <div className="task-grid">
+            {shown.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                language={lang}
+                manager={manager}
+                orchardId={orchardId}
+                busy={!!busy || saving}
+                onEdit={() => edit(task)}
+                onStatus={(status, note) => changeStatus(task, status, note)}
+              />
+            ))}
+          </div>
+        </section>
+        {manager && ready && <SavedRecordings orchardId={orchardId} />}
+        {manager && (
+          <section className="handoff">
+            <div>
+              <p className="eyebrow">SEE THE OTHER SIDE</p>
+              <h2>Ready for the crew?</h2>
+              <p>
+                Switch to Worker view to read the same tasks in Spanish, start work, or send a note
+                back.
+              </p>
+            </div>
+            <button className="secondary" onClick={() => chooseView('worker')}>
+              Open Worker view <span aria-hidden="true">→</span>
+            </button>
+          </section>
+        )}
+      </main>
+      <footer>
+        <span>
+          Orchard Briefing <span aria-hidden="true">/</span>{' '}
+          {es ? 'Un buen comienzo, juntos.' : 'A clear start, together.'}
+        </span>
+        <p>
+          {es
+            ? 'Demo con tareas ficticias. Ambas vistas comparten la lista de este navegador; no son cuentas separadas.'
+            : 'Fictional demo. Both views share this browser’s workspace; they are not separate accounts.'}
+        </p>
+        <a href="https://elevenlabs.io" target="_blank" rel="noreferrer">
+          {es ? 'Voz con ElevenLabs' : 'Voice powered by ElevenLabs'} ↗
+        </a>
+      </footer>
+    </div>
+  );
 }

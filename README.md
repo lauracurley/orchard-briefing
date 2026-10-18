@@ -1,43 +1,65 @@
 # Orchard Briefing
 
-A small field-note and work-list demo for nut orchards. Dictate or type a rough note, turn it into a clear task, edit it when plans change, and hear the open work before heading into the rows.
+Clear instructions for an orchard crew—in English and Spanish.
 
-**Live demo:** https://orchard-briefing.vercel.app/
+**[Open the demo](https://orchard-briefing.vercel.app/)**
 
-The public demo uses fictional orchard data. Lists are scoped to a random ID in each browser; there are no user accounts, shared crews, or private operational records.
+Managers prepare and review tasks, including work locations, materials, and completion criteria. Workers read the same instructions in their preferred language, start work, mark it done, or report a blocker. The demo uses fictional orchard examples.
 
-## Stack and speech flow
+## Current preview
 
-- Next.js, React, TypeScript, and GraphQL
-- Neon PostgreSQL for demo tasks, usage limits, and reusable briefing audio
-- ElevenLabs Scribe v2 for short speech-to-text capture
-- ElevenAgents Chat Mode for a proposed task and one follow-up question when a note is unclear
-- ElevenLabs text-to-speech for the approved open-task briefing
+- Separate **Management** and **Worker** views of one browser-scoped workspace.
+- Prepared bilingual examples; editable English and Spanish instructions.
+- Explicit review before publishing. Custom notes are manually structured and translated during this preview; no simulated model output.
+- Draft recovery on the same device, database-backed published tasks, progress filters, and crew problem notes.
+- Optimistic revision checks reject conflicting edits. Other tabs refresh through BroadcastChannel; switching views, focusing the page, or pressing Refresh fetches current work.
+- New voice generation, transcription, and agent sessions are **locked off in server code**. No environment flag alone can enable spending. Per-task playback only looks up saved audio; a cache miss never calls ElevenLabs.
 
-The grower reviews and approves every proposed task before the GraphQL mutation saves it. Each task can have separate work and materials locations, and can be edited later. The agent can only populate an editable form through a client tool; it has no database write tool. Raw recordings and transcripts are not persisted. The server keeps ElevenLabs keys private. The [agent configuration](docs/elevenlabs-agent.md) documents its prompt, client tool, and approval boundary.
+This is a role preview, not a multi-user production system. Browser workspace IDs are unguessable identifiers, **not authentication**. The two views do not enforce separate permissions, and different devices do not share an orchard. Do not enter private records or employee information.
 
-The note field accepts typing and device keyboard dictation (for example, Fn-D on Mac or the keyboard microphone on iPhone). The unreliable browser speech-recognition button was removed. The separate ElevenLabs capture/agent flow is **off by default**. With it off, visitors can enter notes, inspect a sample, manually review and add tasks, edit tasks, and use saved spoken briefings. Turning the agent flow on requires the separate Scribe and ElevenAgents keys, an agent ID, and an explicit environment flag. Automated tests use no ElevenLabs credits.
+## Architecture
 
-## Run locally
+- Next.js App Router, React, TypeScript
+- GraphQL route for workspace creation, validated task publication and status changes
+- Neon PostgreSQL for tasks, translations, revisions and reusable audio
+- Existing ElevenLabs TTS, Scribe and ElevenAgents server integrations retained behind the preview gate
 
-1. Use Node.js 22.22 or later, then run `npm install`.
-2. Copy `.env.example` to `.env.local`. Set `DATABASE_URL`; set the text-to-speech key and voice ID if you want the existing Listen action.
-3. Run `npm run db:migrate` against the demo database.
-4. Run `npm run dev` and open http://localhost:3000/.
+`src/lib/work-order.ts` defines the task contract, validation and fictional examples. `TaskEditor` handles review; `TaskCard` handles worker actions and read-only playback. `OrchardApp` coordinates the workspace. `src/lib/voice-policy.ts` is the release gate for live provider requests.
 
-The first visit seeds three fictional tasks. The sample note/task button demonstrates the review flow without calling ElevenLabs. To enable live note capture, configure the [agent](docs/elevenlabs-agent.md), set `ELEVENLABS_SPEECH_API_KEY`, `ELEVENLABS_AGENT_API_KEY`, and `ELEVENLABS_AGENT_ID`, then set `ELEVENLABS_CAPTURE_ENABLED=true` and restart. The text-to-speech key is separate.
+Audio identity includes workspace, exact spoken text, language, voice, model and format. Editing spoken instructions changes the cache key; status-only changes do not. A revision check prevents playback against a stale on-screen task. Old whole-list recordings remain in the database and available through the legacy cache endpoints; they are not presented as current per-task recordings.
 
-## Deploy
+## Local development
 
-Import this repo into Vercel, set the environment variables in the project settings, run the database migration against Neon, and deploy. Keep `.env.local` and all credentials out of GitHub. The capture/agent flag should stay `false` until you deliberately approve live usage. Run the migration before deploying code that reads the new task columns.
+Use Node.js 22.22 or later.
 
-This is a **personal, noncommercial portfolio demo**. [Vercel Hobby](https://vercel.com/legal/terms) is limited to personal or noncommercial use, and [ElevenLabs Free](https://help.elevenlabs.io/hc/en-us/articles/13313564601361-Can-I-publish-the-content-I-generate-on-the-platform) does not include a commercial license. Using this for real orchard operations would require a separate hosting and licensing decision.
+```sh
+npm ci
+cp .env.example .env.local
+# Set DATABASE_URL privately in .env.local.
+node --env-file=.env.local scripts/migrate.mjs
+npm run dev
+```
 
-## Usage controls and quality checks
+Open http://localhost:3000/. A new browser workspace receives three fictional bilingual tasks. Existing workspaces retain their tasks. The migration is additive and repeatable; it does not rewrite existing instructions.
 
-- Transcription and agent sessions are each capped at one attempt per browser ID and 12 total in a rolling 24 hours. Audio uploads are limited to 1.5 MB; the browser recording stops at 20 seconds. These limits protect a tiny public demo; browser IDs are not authentication.
-- The spoken briefing permits at most two new generations per browser ID and 25 total in a rolling 24 hours. The server stores generated audio by orchard, exact spoken text, voice, model, and format; repeats of an unchanged list reuse it after refreshes and across deployments without another ElevenLabs call or quota use. The latest saved recording can also be replayed when the list has changed, with a visible stale-list warning and without using a generation attempt. To bound free database storage, only recordings older than 24 hours can be pruned, and only when more than 50 distinct versions are saved. A list or voice change, or an evicted recording, requires a new generation for the current list.
-- The agent session uses a signed URL from a server route, and the agent should be configured as text-only with a 60-second maximum duration. The client tool never saves a task.
-- Run `npm run lint && npm run typecheck && npm test && npm run build`. Tests cover task wording and validation without calling ElevenLabs.
+## Quality checks
 
-No real orchard records, employee information, or credentials belong in this repository or the public demo database.
+```sh
+npm run lint
+npm run typecheck
+npm test
+npm run build
+npm run test:e2e
+```
+
+Unit tests cover publication requirements, translation completeness, blocker validation, audio identity and credit locks. Playwright tests exercise desktop and phone layouts, draft recovery, failed saves, task edits, and the English/Spanish handoff with mocked GraphQL responses. Paid endpoints are intercepted and asserted unused. Direct HTTP tests also verify the server capture locks. Local browser tests use installed Chrome; CI installs Chromium.
+
+The database-backed flow must additionally be smoke-tested after deployment; browser mocks do not establish database integration correctness. Run `ORCHARD_SMOKE_URL=https://your-deployment.example node scripts/smoke.mjs` explicitly against the intended deployment. It creates one isolated fictional workspace and checks persistence, revision conflicts, translation validation and workspace isolation without requesting voice generation.
+
+## Deployment and live speech
+
+Run the migration before deploying to Vercel. Store secrets only in environment settings, never in source control. No new provider credentials are required for this preview. See [design and release notes](docs/product-design.md) for scope and acceptance criteria, and [agent configuration](docs/elevenlabs-agent.md) for the retained agent contract.
+
+Enabling speech is a separate release: approve a minimal live test, select the English/Spanish voices, validate pronunciation and translation, then connect a restricted manager publication action to generation. Worker playback must remain read-only. Review quota controls and cache retention before enabling anything.
+
+This is a personal, noncommercial prototype. Real operational use requires authentication, explicit crew access, and review of hosting and speech licensing. No private planning notes, credentials or real orchard records belong in this public repository.
