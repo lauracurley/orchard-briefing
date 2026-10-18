@@ -1,5 +1,7 @@
 # ElevenAgents task-drafting configuration
 
+This document preserves the integration contract for a future speech release. The current bilingual preview has no agent client session and locks provider calls off in `src/lib/voice-policy.ts`; setting an environment flag cannot override that lock. Reconnect and verify the client tool only after an approved live test plan.
+
 This document is for maintainers. The product interface uses plain orchard language.
 
 Create a **private agent** in ElevenLabs, enable [Chat Mode](https://elevenlabs.io/docs/eleven-agents/guides/chat-mode) as text-only, require authentication, and set a 60-second [maximum conversation duration](https://elevenlabs.io/docs/eleven-agents/customization/conversation-flow). The application obtains a one-use signed URL server-side. Configure the agent to send text responses and allow a client tool named exactly `proposeTask`.
