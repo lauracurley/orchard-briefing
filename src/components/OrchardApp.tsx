@@ -92,6 +92,7 @@ export default function OrchardApp() {
     setOrchardId(id);
     setStorageReady(true);
     function syncView() {
+      window.scrollTo({ top: 0, behavior: 'instant' });
       setView(window.location.hash === '#worker' ? 'worker' : 'management');
       setFilter('all');
     }
@@ -126,6 +127,7 @@ export default function OrchardApp() {
     setNotice('');
     window.location.hash = next;
     setView(next);
+    window.scrollTo({ top: 0, behavior: 'instant' });
     setFilter('all');
     if (orchardId) void refresh(orchardId);
   }
@@ -488,7 +490,9 @@ export default function OrchardApp() {
               <p>
                 {es
                   ? 'Selecciona Todas para ver la lista completa.'
-                  : 'Choose All tasks to see the whole list, or prepare a new task.'}
+                  : manager
+                    ? 'Choose All tasks to see the whole list, or prepare a new task.'
+                    : 'Choose All tasks to see the whole list. Ask your manager if something is missing.'}
               </p>
             </div>
           )}

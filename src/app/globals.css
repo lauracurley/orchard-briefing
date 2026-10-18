@@ -312,7 +312,7 @@ small {
 }
 .overview strong small {
   font-size: 17px;
-  color: #7c897b;
+  color: #5e6b61;
   font-weight: 400;
 }
 .overview span {
@@ -477,7 +477,7 @@ progress::-webkit-progress-value {
 .task-audio small {
   display: block;
   font-size: 10px;
-  color: #77806e;
+  color: #5e6b61;
   margin-top: 2px;
 }
 .task-audio audio {
@@ -665,7 +665,7 @@ textarea {
 }
 input::placeholder,
 textarea::placeholder {
-  color: #83907e;
+  color: #687660;
   font-size: 13px;
 }
 input[type='checkbox'] {
