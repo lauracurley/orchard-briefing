@@ -2,6 +2,8 @@
 
 A small field list for nut orchard growers. Record tasks for chestnuts, walnuts, heartnuts, and hazels, then hear an open-task briefing generated with ElevenLabs text to speech.
 
+**Live demo:** https://orchard-briefing.vercel.app/
+
 ## Stack
 
 - Next.js, React, and TypeScript
