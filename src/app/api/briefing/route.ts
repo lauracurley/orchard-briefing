@@ -28,7 +28,12 @@ export async function POST(request: Request) {
       body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2' }),
     });
     if (!upstream.ok) {
-      console.error('ElevenLabs text to speech failed with status', upstream.status);
+      let providerCode = 'unknown';
+      try {
+        const body = await upstream.json();
+        if (typeof body?.detail?.status === 'string') providerCode = body.detail.status;
+      } catch { /* Some provider errors have no JSON body. */ }
+      console.error('ElevenLabs text to speech failed', upstream.status, providerCode);
       await sql`DELETE FROM voice_requests WHERE id = ${quota[0].id}`;
       return Response.json({ error: 'The spoken briefing is temporarily unavailable.' }, { status: 502 });
     }
