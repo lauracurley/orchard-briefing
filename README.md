@@ -16,7 +16,7 @@ The public demo uses fictional orchard data. Lists are scoped to a random ID in 
 
 The grower reviews and approves every proposed task before the GraphQL mutation saves it. Each task can have separate work and materials locations, and can be edited later. The agent can only populate an editable form through a client tool; it has no database write tool. Raw recordings and transcripts are not persisted. The server keeps ElevenLabs keys private. The [agent configuration](docs/elevenlabs-agent.md) documents its prompt, client tool, and approval boundary.
 
-Browser dictation is available when the browser supports speech recognition; it can use the browser provider's online speech service and does not call ElevenLabs. The separate ElevenLabs capture/agent flow is **off by default**. With it off, visitors can dictate or type notes, inspect a sample, manually review and add tasks, edit tasks, and use saved spoken briefings. Turning the agent flow on requires the separate Scribe and ElevenAgents keys, an agent ID, and an explicit environment flag. Automated tests use no ElevenLabs credits.
+Browser dictation uses a Start/Stop button when the browser supports speech recognition. It can use the browser provider's online speech service and does not call ElevenLabs; browser or microphone failures are shown beside the note. The separate ElevenLabs capture/agent flow is **off by default**. With it off, visitors can dictate or type notes, inspect a sample, manually review and add tasks, edit tasks, and use saved spoken briefings. Turning the agent flow on requires the separate Scribe and ElevenAgents keys, an agent ID, and an explicit environment flag. Automated tests use no ElevenLabs credits.
 
 ## Run locally
 
