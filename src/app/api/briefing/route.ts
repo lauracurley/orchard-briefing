@@ -1,7 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { db, validOrchardId } from '@/lib/db';
 import { makeBriefing, type BriefingTask } from '@/lib/briefing';
+import {
+  AudioPendingError, AudioQuotaError, BRIEFING_FORMAT, BRIEFING_MODEL,
+  briefingAudioKey, getOrCreateBriefingAudio, type AudioStore,
+} from '@/lib/briefing-audio';
 
 export const runtime = 'nodejs';
+
+class VoiceProviderError extends Error {}
 
 export async function POST(request: Request) {
   let orchardId: unknown;
@@ -13,32 +20,71 @@ export async function POST(request: Request) {
 
   try {
     const sql = db();
-    const rows = await sql`SELECT species, title, done FROM tasks WHERE orchard_id = ${orchardId} ORDER BY id DESC LIMIT 20`;
+    const rows = await sql`SELECT species, title, location, done_when, done FROM tasks WHERE orchard_id = ${orchardId} ORDER BY id DESC LIMIT 20`;
     if (!rows.length) return Response.json({ error: 'Add a task before listening.' }, { status: 400 });
-    const quota = await sql`INSERT INTO voice_requests (orchard_id)
-      SELECT ${orchardId} FROM orchards WHERE id = ${orchardId}
-      AND (SELECT count(*) FROM voice_requests WHERE requested_at >= now() - interval '24 hours') < 25
-      AND (SELECT count(*) FROM voice_requests WHERE orchard_id = ${orchardId} AND requested_at >= now() - interval '24 hours') < 2
-      RETURNING id`;
-    if (!quota.length) return Response.json({ error: 'Today’s listening limit has been reached. Please try again tomorrow.' }, { status: 429 });
     const text = makeBriefing(rows as BriefingTask[]);
-    const upstream = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=mp3_44100_128`, {
-      method: 'POST',
-      headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2' }),
-    });
-    if (!upstream.ok) {
-      let providerCode = 'unknown';
-      try {
-        const body = await upstream.json();
-        if (typeof body?.detail?.status === 'string') providerCode = body.detail.status;
-      } catch { /* Some provider errors have no JSON body. */ }
-      console.error('ElevenLabs text to speech failed', upstream.status, providerCode);
-      await sql`DELETE FROM voice_requests WHERE id = ${quota[0].id}`;
-      return Response.json({ error: 'The spoken briefing is temporarily unavailable.' }, { status: 502 });
-    }
-    return new Response(upstream.body, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' } });
-  } catch {
+    const key = briefingAudioKey(orchardId, text, voiceId);
+    const store: AudioStore = {
+      async load(cacheKey) {
+        const matches = await sql`SELECT audio_base64 FROM briefing_audio_cache WHERE cache_key = ${cacheKey} AND audio_base64 IS NOT NULL`;
+        return typeof matches[0]?.audio_base64 === 'string' ? matches[0].audio_base64 : null;
+      },
+      async claim(cacheKey, owner) {
+        const claimed = await sql`INSERT INTO briefing_audio_cache (cache_key, owner_token) VALUES (${cacheKey}, ${owner})
+          ON CONFLICT (cache_key) DO UPDATE SET owner_token = EXCLUDED.owner_token, reserved_at = now()
+          WHERE briefing_audio_cache.audio_base64 IS NULL
+            AND briefing_audio_cache.reserved_at < now() - interval '60 seconds'
+          RETURNING cache_key`;
+        return claimed.length > 0;
+      },
+      async save(cacheKey, owner, audioBase64) {
+        const saved = await sql`UPDATE briefing_audio_cache SET audio_base64 = ${audioBase64}, created_at = now()
+          WHERE cache_key = ${cacheKey} AND owner_token = ${owner} RETURNING cache_key`;
+        if (!saved.length) throw new Error('Audio cache claim expired.');
+        try {
+          await sql`DELETE FROM briefing_audio_cache WHERE created_at < now() - interval '24 hours' AND cache_key IN (
+            SELECT cache_key FROM briefing_audio_cache WHERE audio_base64 IS NOT NULL
+            ORDER BY created_at DESC OFFSET 50
+          )`;
+        } catch (error) { console.warn('Could not prune old briefing audio', error); }
+      },
+      async release(cacheKey, owner) {
+        await sql`DELETE FROM briefing_audio_cache WHERE cache_key = ${cacheKey} AND owner_token = ${owner} AND audio_base64 IS NULL`;
+      },
+      async reserveQuota() {
+        const quota = await sql`INSERT INTO voice_requests (orchard_id)
+          SELECT ${orchardId} FROM orchards WHERE id = ${orchardId}
+          AND (SELECT count(*) FROM voice_requests WHERE requested_at >= now() - interval '24 hours') < 25
+          AND (SELECT count(*) FROM voice_requests WHERE orchard_id = ${orchardId} AND requested_at >= now() - interval '24 hours') < 2
+          RETURNING id`;
+        return quota.length ? String(quota[0].id) : null;
+      },
+      async refundQuota(id) { await sql`DELETE FROM voice_requests WHERE id = ${id}`; },
+    };
+
+    const audio = await getOrCreateBriefingAudio(key, store, async () => {
+      const upstream = await fetch(`https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voiceId)}?output_format=${BRIEFING_FORMAT}`, {
+        method: 'POST',
+        headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text, model_id: BRIEFING_MODEL }),
+      });
+      if (!upstream.ok) {
+        let providerCode = 'unknown';
+        try {
+          const body = await upstream.json();
+          if (typeof body?.detail?.status === 'string') providerCode = body.detail.status;
+        } catch { /* Some provider errors have no JSON body. */ }
+        console.error('ElevenLabs text to speech failed', upstream.status, providerCode);
+        throw new VoiceProviderError('The spoken briefing is temporarily unavailable.');
+      }
+      return new Uint8Array(await upstream.arrayBuffer());
+    }, { owner: randomUUID() });
+    return new Response(Uint8Array.from(audio), { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' } });
+  } catch (error) {
+    if (error instanceof AudioQuotaError) return Response.json({ error: error.message }, { status: 429 });
+    if (error instanceof AudioPendingError) return Response.json({ error: error.message }, { status: 503 });
+    if (error instanceof VoiceProviderError) return Response.json({ error: error.message }, { status: 502 });
+    console.error('Briefing failed', error);
     return Response.json({ error: 'The briefing is temporarily unavailable.' }, { status: 500 });
   }
 }

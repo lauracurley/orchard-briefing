@@ -9,7 +9,7 @@ The public demo uses fictional orchard data. Lists are scoped to a random ID in 
 ## Stack and speech flow
 
 - Next.js, React, TypeScript, and GraphQL
-- Neon PostgreSQL for demo tasks and usage limits
+- Neon PostgreSQL for demo tasks, usage limits, and reusable briefing audio
 - ElevenLabs Scribe v2 for short speech-to-text capture
 - ElevenAgents Chat Mode for a proposed task and one follow-up question when a note is unclear
 - ElevenLabs text-to-speech for the approved open-task briefing
@@ -36,7 +36,7 @@ This is a **personal, noncommercial portfolio demo**. [Vercel Hobby](https://ver
 ## Usage controls and quality checks
 
 - Transcription and agent sessions are each capped at one attempt per browser ID and 12 total in a rolling 24 hours. Audio uploads are limited to 1.5 MB; the browser recording stops at 20 seconds. These limits protect a tiny public demo; browser IDs are not authentication.
-- The spoken briefing retains its existing limit of two requests per browser ID and 25 total in 24 hours. Replaying an unchanged briefing in the same page session reuses its audio without another API call.
+- The spoken briefing permits at most two new generations per browser ID and 25 total in a rolling 24 hours. The server stores generated audio by orchard, exact spoken text, voice, model, and format; repeats of an unchanged list reuse it after refreshes and across deployments without another ElevenLabs call or quota use. To bound free database storage, only recordings older than 24 hours can be pruned, and only when more than 50 distinct versions are saved. A list or voice change, or an evicted recording, requires a new generation.
 - The agent session uses a signed URL from a server route, and the agent should be configured as text-only with a 60-second maximum duration. The client tool never saves a task.
 - Run `npm run lint && npm run typecheck && npm test && npm run build`. Tests cover task wording and validation without calling ElevenLabs.
 

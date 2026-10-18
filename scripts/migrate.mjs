@@ -38,4 +38,11 @@ await sql`CREATE TABLE IF NOT EXISTS agent_sessions (
   requested_at timestamptz NOT NULL DEFAULT now()
 )`;
 await sql`CREATE INDEX IF NOT EXISTS agent_sessions_requested_at_idx ON agent_sessions (requested_at)`;
+await sql`CREATE TABLE IF NOT EXISTS briefing_audio_cache (
+  cache_key text PRIMARY KEY,
+  owner_token uuid NOT NULL,
+  audio_base64 text,
+  reserved_at timestamptz NOT NULL DEFAULT now(),
+  created_at timestamptz
+)`;
 console.log('Database ready');
