@@ -9,6 +9,14 @@ import { MAX_NOTE_SECONDS } from '@/lib/voice-note';
 type Task = { id: string; species: Species; title: string; location: string | null; materialsLocation: string | null; doneWhen: string | null; done: boolean };
 type TaskForm = { species: Species | ''; title: string; location: string; materialsLocation: string; doneWhen: string };
 type AgentStatus = 'idle' | 'connecting' | 'working' | 'question' | 'ready';
+type BriefingStatus = { currentCached: boolean; previousKey: string | null };
+type BrowserRecognition = {
+  lang: string; interimResults: boolean; continuous: boolean;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error: string }) => void) | null;
+  onend: (() => void) | null;
+  start(): void; stop(): void;
+};
 
 const TASK_FIELDS = 'id species title location materialsLocation doneWhen done';
 const SAMPLE_NOTE = 'The guards in the west chestnut rows looked loose after last night’s wind. Check them before lunch.';
@@ -31,6 +39,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
   const audioRef = useRef<HTMLAudioElement>(null);
   const audioUrl = useRef<string | null>(null);
   const audioKey = useRef('');
+  const browserRecognition = useRef<BrowserRecognition | null>(null);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [ready, setReady] = useState(false);
   const [note, setNote] = useState('');
@@ -50,6 +59,8 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
   const [editDraft, setEditDraft] = useState<TaskForm>({ species: '', title: '', location: '', materialsLocation: '', doneWhen: '' });
   const [editSaving, setEditSaving] = useState(false);
   const [speaking, setSpeaking] = useState(false);
+  const [dictating, setDictating] = useState(false);
+  const [briefingStatus, setBriefingStatus] = useState<BriefingStatus | null>(null);
   const [error, setError] = useState('');
 
   const conversation = useConversation({
@@ -86,11 +97,43 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
       if (mediaRecorder.current?.state === 'recording') mediaRecorder.current.stop();
       stream.current?.getTracks().forEach((track) => track.stop());
       if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
+      browserRecognition.current?.stop();
     };
   }, []);
 
   const open = tasks.filter((task) => !task.done);
   const currentAudioKey = JSON.stringify(open.map(({ id, species: tree, title: taskTitle, location: place, materialsLocation: supplies, doneWhen: criterion }) => [id, tree, taskTitle, place, supplies, criterion]));
+
+  useEffect(() => {
+    if (!ready) return;
+    let active = true;
+    setBriefingStatus(null);
+    fetch('/api/briefing/status', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orchardId: orchardId.current }) })
+      .then(async (response) => { if (!response.ok) throw new Error('Could not check recordings.'); return response.json() as Promise<BriefingStatus>; })
+      .then((status) => { if (active) setBriefingStatus(status); })
+      .catch(() => { if (active) setBriefingStatus(null); });
+    return () => { active = false; };
+  }, [ready, currentAudioKey]);
+
+  function toggleDictation() {
+    if (dictating) { browserRecognition.current?.stop(); return; }
+    const speechWindow = window as typeof window & { SpeechRecognition?: new () => BrowserRecognition; webkitSpeechRecognition?: new () => BrowserRecognition };
+    const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+    if (!Recognition) { setError('Dictation is not available in this browser. Try Chrome, or type your note.'); return; }
+    setError('');
+    const recognition = new Recognition();
+    recognition.lang = 'en-US'; recognition.interimResults = false; recognition.continuous = false;
+    recognition.onresult = (event) => {
+      const transcript = Array.from(event.results).map((result) => result[0]?.transcript ?? '').join(' ').trim();
+      if (transcript) setNote((previous) => [previous.trim(), transcript].filter(Boolean).join(' ').slice(0, 1500));
+    };
+    recognition.onerror = (event) => {
+      if (event.error !== 'no-speech' && event.error !== 'aborted') setError('Dictation stopped. Check microphone access, or type your note.');
+    };
+    recognition.onend = () => { setDictating(false); browserRecognition.current = null; };
+    browserRecognition.current = recognition;
+    try { recognition.start(); setDictating(true); } catch { setError('Dictation could not start. You can type your note.'); browserRecognition.current = null; }
+  }
 
   function loadSample() {
     setNote(SAMPLE_NOTE);
@@ -241,29 +284,46 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
       if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
       audioUrl.current = URL.createObjectURL(await response.blob());
       audioKey.current = currentAudioKey;
+      setBriefingStatus((previous) => ({ currentCached: true, previousKey: previous?.previousKey ?? null }));
       if (audioRef.current) { audioRef.current.src = audioUrl.current; await audioRef.current.play(); }
     } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not play the briefing.'); }
     finally { setSpeaking(false); }
   }
 
+  async function replayLast() {
+    setSpeaking(true); setError('');
+    try {
+      const response = await fetch('/api/briefing/last', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ orchardId: orchardId.current, cacheKey: briefingStatus?.previousKey }) });
+      if (!response.ok) { const payload = await response.json(); throw new Error(payload.error ?? 'Could not play the saved recording.'); }
+      if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
+      audioUrl.current = URL.createObjectURL(await response.blob());
+      audioKey.current = '';
+      if (audioRef.current) { audioRef.current.src = audioUrl.current; await audioRef.current.play(); }
+    } catch (reason) { setError(reason instanceof Error ? reason.message : 'Could not play the saved recording.'); }
+    finally { setSpeaking(false); }
+  }
+
+  const listenLabel = speaking ? 'Preparing audio…' : briefingStatus?.currentCached ? '▶  Play today’s recording' : '▶  Make today’s recording';
+
   return <main>
     <header className="topbar"><a className="brand" href="#top"><span className="brand-mark">◎</span> Orchard Briefing</a><a className="header-link" href="#today">Today’s work <span aria-hidden="true">↗</span></a></header>
     <section className="hero" id="top">
-      <div className="hero-copy"><p className="eyebrow">A CLEAR START IN THE ORCHARD</p><h1>Know what needs doing <em>before you head out.</em></h1><p className="lede">Turn a quick field note into a clear task. Review it, add it to today’s work, and hear the list read aloud.</p><div className="hero-actions"><a className="primary" href="#new-note">Make a field note <span aria-hidden="true">→</span></a><button className="text-action" onClick={listen} disabled={!ready || speaking || !open.length}>{speaking ? 'Preparing…' : '▶  Hear today’s work'}</button></div></div>
+      <div className="hero-copy"><p className="eyebrow">A CLEAR START IN THE ORCHARD</p><h1>Know what needs doing <em>before you head out.</em></h1><p className="lede">Turn a quick field note into a clear task. Review it, add it to today’s work, and hear the list read aloud.</p><div className="hero-actions"><a className="primary" href="#new-note">Make a field note <span aria-hidden="true">→</span></a><a className="text-action" href="#today">Hear today’s work ↓</a></div></div>
       <div className="hero-art" aria-hidden="true"><div className="sun"/><div className="hill hill-back"/><div className="hill hill-front"/><div className="tree tree-one"><i/><b/></div><div className="tree tree-two"><i/><b/></div><div className="tree tree-three"><i/><b/></div><div className="tree tree-four"><i/><b/></div><div className="art-label">CHESTNUT · WALNUT · HEARTNUT · HAZEL</div></div>
     </section>
     <section className="workspace" aria-label="Field work">
-      <div className="section-heading"><p className="eyebrow">FROM NOTE TO WORK LIST</p><h2>A little clarity goes a long way.</h2><p>Start with what you noticed. Check the task before anyone acts on it.</p></div>
+      <div className="section-heading"><p className="eyebrow">FROM NOTE TO WORK LIST</p><h2>One note. One clear task.</h2><p>Write or dictate what you noticed, then turn it into instructions the crew can use.</p></div>
       <div className="work-grid">
-        <section className="note-panel" id="new-note" aria-labelledby="note-heading"><div className="step">01 / FIELD NOTE</div><h3 id="note-heading">What did you notice?</h3><p>Say it as you remember it. You can tidy the task before adding it to the list.</p>
+        <section className="note-panel" id="new-note" aria-labelledby="note-heading"><div className="step">STEP 1 OF 2 · FIELD NOTE</div><h3 id="note-heading">What did you notice?</h3><p>Get the rough details down. You’ll make them clear in the next step.</p>
           {captureEnabled && <div className="record-row"><button type="button" className={recording ? 'record-button recording' : 'record-button'} onClick={recording ? stopRecording : startRecording} disabled={!ready || transcribing}>{recording ? '■  Stop recording' : '●  Record a note'}</button><span>Up to {MAX_NOTE_SECONDS} seconds</span></div>}
           {captureEnabled && clip && <button type="button" className="inline-button" onClick={transcribe} disabled={transcribing}>{transcribing ? 'Turning speech into text…' : 'Turn recording into text →'}</button>}
-          <label htmlFor="rough-note">Your note</label><textarea id="rough-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={1500} rows={5} placeholder="What happened? Where? When does it need attention?"/>
+          <div className="note-label-row"><label htmlFor="rough-note">Your note</label><button type="button" className={dictating ? 'record-button recording' : 'record-button'} onClick={toggleDictation} aria-pressed={dictating}>{dictating ? '■  Stop dictating' : '🎙  Dictate note'}</button></div><textarea id="rough-note" value={note} onChange={(event) => setNote(event.target.value)} maxLength={1500} rows={5} placeholder="What happened? Where? When does it need attention?"/><p className="dictation-help">Your browser handles dictation and may process speech online. You can always type instead.</p>
           <div className="note-actions"><button type="button" className="inline-button" onClick={loadSample}>See a sample note and task →</button>{captureEnabled && <button type="button" className="secondary" onClick={suggestTask} disabled={!ready || !note.trim() || agentStatus === 'connecting' || agentStatus === 'working' || conversation.status === 'connected'}>{agentStatus === 'connecting' || agentStatus === 'working' ? 'Preparing a task…' : 'Make a clear task →'}</button>}</div>
+          <button type="button" className="continue-button" onClick={() => document.getElementById('title')?.focus()} disabled={!note.trim()}>Next: make a clear task →</button>
           {agentMessage && <div className="agent-message" role="status">{agentMessage}</div>}
           {agentStatus === 'question' && conversation.status === 'connected' && <div className="reply-row"><label htmlFor="reply">Your answer</label><input id="reply" value={reply} onChange={(event) => setReply(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') sendReply(); }} placeholder="Add the missing detail"/><button type="button" className="inline-button" onClick={sendReply}>Send answer →</button></div>}
         </section>
-        <section className="draft-panel" aria-labelledby="draft-heading"><div className="step">02 / CHECK THE TASK</div><h3 id="draft-heading">Make it clear for the next person.</h3><p>Check every detail. Leave anything uncertain blank until you know.</p><form onSubmit={addTask}>
+        <section className="draft-panel" aria-labelledby="draft-heading"><div className="step">STEP 2 OF 2 · CLEAR TASK</div><h3 id="draft-heading">Make it clear for the crew.</h3><p>Use your note to write one action. Check every detail before adding it to the list.</p>{note.trim() && <div className="note-reference"><strong>Your note</strong><p>{note}</p></div>}<form onSubmit={addTask}>
           <label htmlFor="species">Tree</label><select id="species" value={species} onChange={(event) => setSpecies(event.target.value as Species | '')} required><option value="">Choose a tree</option>{SPECIES.map((item) => <option key={item}>{item}</option>)}</select>
           <label htmlFor="title">What needs doing?</label><input id="title" value={title} onChange={(event) => setTitle(event.target.value)} maxLength={120} placeholder="Check the tree guards" required/>
           <label htmlFor="location">Where is the work?</label><input id="location" value={location} onChange={(event) => setLocation(event.target.value)} maxLength={60} placeholder="West chestnut rows"/>
@@ -272,7 +332,7 @@ function HomeContent({ captureEnabled }: { captureEnabled: boolean }) {
           <button className="secondary save-button" type="submit" disabled={!ready || saving || !species || !title.trim()}>{saving ? 'Adding…' : 'Approve and add to list →'}</button>
         </form></section>
       </div>
-      <section className="today" id="today" aria-labelledby="today-heading"><div className="today-heading"><div><p className="eyebrow">03 / TODAY’S WORK</p><h2 id="today-heading">Ready for the rows.</h2><p>A short list you can read here or hear before heading out. Once made, the same recording plays again while the list stays the same.</p></div><button className="primary listen-button" type="button" onClick={listen} disabled={!ready || speaking || !open.length}>{speaking ? 'Preparing audio…' : '▶  Hear today’s work'}</button></div>
+      <section className="today" id="today" aria-labelledby="today-heading"><div className="today-heading"><div><p className="eyebrow">TODAY’S WORK</p><h2 id="today-heading">Ready for the rows.</h2><p>Read the current list here or hear it before heading out.</p></div><div className="listen-actions"><button className="primary listen-button" type="button" onClick={listen} disabled={!ready || !briefingStatus || speaking || !open.length}>{listenLabel}</button>{briefingStatus && !briefingStatus.currentCached && <small>Making a new recording uses the voice service and has a daily limit.</small>}{briefingStatus?.previousKey && <><button className="inline-button" type="button" onClick={replayLast} disabled={speaking}>▶  Replay earlier recording</button><small>It may describe an older list. Replaying does not make a new recording.</small></>}</div></div>
         <div className="task-list">
           {!ready && <p className="empty">Loading today’s work…</p>}
           {ready && !tasks.length && <p className="empty">Add a task to start your list.</p>}

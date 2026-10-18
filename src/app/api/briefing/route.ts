@@ -30,8 +30,8 @@ export async function POST(request: Request) {
         return typeof matches[0]?.audio_base64 === 'string' ? matches[0].audio_base64 : null;
       },
       async claim(cacheKey, owner) {
-        const claimed = await sql`INSERT INTO briefing_audio_cache (cache_key, owner_token) VALUES (${cacheKey}, ${owner})
-          ON CONFLICT (cache_key) DO UPDATE SET owner_token = EXCLUDED.owner_token, reserved_at = now()
+        const claimed = await sql`INSERT INTO briefing_audio_cache (cache_key, owner_token, orchard_id) VALUES (${cacheKey}, ${owner}, ${orchardId})
+          ON CONFLICT (cache_key) DO UPDATE SET owner_token = EXCLUDED.owner_token, orchard_id = EXCLUDED.orchard_id, reserved_at = now()
           WHERE briefing_audio_cache.audio_base64 IS NULL
             AND briefing_audio_cache.reserved_at < now() - interval '60 seconds'
           RETURNING cache_key`;

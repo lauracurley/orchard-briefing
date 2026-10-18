@@ -46,4 +46,6 @@ await sql`CREATE TABLE IF NOT EXISTS briefing_audio_cache (
   reserved_at timestamptz NOT NULL DEFAULT now(),
   created_at timestamptz
 )`;
+await sql`ALTER TABLE briefing_audio_cache ADD COLUMN IF NOT EXISTS orchard_id uuid REFERENCES orchards(id) ON DELETE CASCADE`;
+await sql`CREATE INDEX IF NOT EXISTS briefing_audio_cache_orchard_id_idx ON briefing_audio_cache (orchard_id, created_at DESC)`;
 console.log('Database ready');
