@@ -27,7 +27,11 @@ export async function POST(request: Request) {
       headers: { 'xi-api-key': apiKey, 'Content-Type': 'application/json' },
       body: JSON.stringify({ text, model_id: 'eleven_multilingual_v2' }),
     });
-    if (!upstream.ok) return Response.json({ error: 'The spoken briefing is temporarily unavailable.' }, { status: 502 });
+    if (!upstream.ok) {
+      console.error('ElevenLabs text to speech failed with status', upstream.status);
+      await sql`DELETE FROM voice_requests WHERE id = ${quota[0].id}`;
+      return Response.json({ error: 'The spoken briefing is temporarily unavailable.' }, { status: 502 });
+    }
     return new Response(upstream.body, { headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' } });
   } catch {
     return Response.json({ error: 'The briefing is temporarily unavailable.' }, { status: 500 });
