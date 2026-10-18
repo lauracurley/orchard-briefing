@@ -18,10 +18,24 @@ await sql`CREATE TABLE IF NOT EXISTS tasks (
   created_at timestamptz NOT NULL DEFAULT now()
 )`;
 await sql`CREATE INDEX IF NOT EXISTS tasks_orchard_id_idx ON tasks (orchard_id, id)`;
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS location text`;
+await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS done_when text`;
 await sql`CREATE TABLE IF NOT EXISTS voice_requests (
   id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
   orchard_id uuid NOT NULL REFERENCES orchards(id) ON DELETE CASCADE,
   requested_at timestamptz NOT NULL DEFAULT now()
 )`;
 await sql`CREATE INDEX IF NOT EXISTS voice_requests_requested_at_idx ON voice_requests (requested_at)`;
+await sql`CREATE TABLE IF NOT EXISTS transcription_requests (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  orchard_id uuid NOT NULL REFERENCES orchards(id) ON DELETE CASCADE,
+  requested_at timestamptz NOT NULL DEFAULT now()
+)`;
+await sql`CREATE INDEX IF NOT EXISTS transcription_requests_requested_at_idx ON transcription_requests (requested_at)`;
+await sql`CREATE TABLE IF NOT EXISTS agent_sessions (
+  id bigint GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+  orchard_id uuid NOT NULL REFERENCES orchards(id) ON DELETE CASCADE,
+  requested_at timestamptz NOT NULL DEFAULT now()
+)`;
+await sql`CREATE INDEX IF NOT EXISTS agent_sessions_requested_at_idx ON agent_sessions (requested_at)`;
 console.log('Database ready');

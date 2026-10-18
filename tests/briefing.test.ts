@@ -17,3 +17,9 @@ test('task titles are normalized and bounded', () => {
   assert.throws(() => cleanTitle(' '.repeat(10)));
   assert.throws(() => cleanTitle('x'.repeat(121)));
 });
+
+test('briefing includes approved location and completion detail', () => {
+  const text = makeBriefing([{ species: 'Chestnut', title: 'Check guards', location: 'West rows', done_when: 'Loose guards are noted', done: false }]);
+  assert.match(text, /Check guards in West rows/);
+  assert.match(text, /Done when: Loose guards are noted/);
+});
