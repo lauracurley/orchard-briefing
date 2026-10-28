@@ -1,5 +1,4 @@
 'use client';
-import { Button } from '@/components/ui/button';
 import { useEffect, useRef, useState } from 'react';
 
 export default function SavedRecordings({ orchardId }: { orchardId: string }) {
@@ -74,7 +73,7 @@ export default function SavedRecordings({ orchardId }: { orchardId: string }) {
       {loading && <p role="status">Loading…</p>}
       {recordings?.length === 0 && <p>No earlier recordings in this workspace.</p>}
       {recordings?.map((recording) => (
-        <Button
+        <button
           key={recording.cacheKey}
           className="secondary"
           disabled={loading}
@@ -82,7 +81,7 @@ export default function SavedRecordings({ orchardId }: { orchardId: string }) {
         >
           {selected === recording.cacheKey ? 'Loaded' : 'Open recording'} ·{' '}
           {new Date(recording.createdAt).toLocaleString()}
-        </Button>
+        </button>
       ))}
       {audio && <audio key={audio} controls src={audio} aria-label="Earlier saved briefing" />}
       {error && (

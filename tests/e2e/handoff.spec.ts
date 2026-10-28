@@ -7,7 +7,6 @@ async function mockWorkspace(page: Page) {
     id: String(index + 1),
     species: example.species,
     spanish: example.spanish,
-    german: example.german,
     status: 'ready',
     revision: 1,
     done: false,
@@ -17,20 +16,13 @@ async function mockWorkspace(page: Page) {
   let failSave = false;
   await page.route('**/api/**', async (route) => {
     const url = route.request().url();
-    if (
-      /\/(briefing|transcribe|agent-session)(\/|$)/.test(url) ||
-      url.endsWith('/task-audio/create')
-    ) {
+    if (/\/(briefing|transcribe|agent-session)(\/|$)/.test(url)) {
       paidRequests.push(url);
       await route.abort();
       return;
     }
     if (url.endsWith('/task-audio')) {
       await route.fulfill({ json: { available: false } });
-      return;
-    }
-    if (url.endsWith('/recordings')) {
-      await route.fulfill({ json: { recordings: [] } });
       return;
     }
     if (!url.endsWith('/graphql')) {
@@ -49,7 +41,6 @@ async function mockWorkspace(page: Page) {
         ...v.input.english,
         species: v.input.species,
         spanish: v.input.spanish,
-        german: v.input.german,
         id: v.taskId ?? String(tasks.length + 1),
         revision: (v.revision ?? 0) + 1,
         status: 'ready',
@@ -75,9 +66,7 @@ async function mockWorkspace(page: Page) {
       });
   });
   await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Prepare a task' })).toBeEnabled({
-    timeout: 30000,
-  });
+  await expect(page.getByRole('button', { name: '+ New task' })).toBeEnabled();
   return {
     paidRequests,
     failSaving: () => {
@@ -89,9 +78,8 @@ async function mockWorkspace(page: Page) {
 test('review, publish, complete in Spanish, then see management progress without paid calls', async ({
   page,
 }) => {
-  test.setTimeout(90000);
   const api = await mockWorkspace(page);
-  await page.getByRole('button', { name: 'Try a translated example' }).click();
+  await page.getByRole('button', { name: 'Try a bilingual example' }).click();
   await expect(page.getByRole('button', { name: 'Publish task' })).toBeDisabled();
   await page
     .getByRole('group', { name: 'English', exact: true })
@@ -104,14 +92,14 @@ test('review, publish, complete in Spanish, then see management progress without
   await page.getByRole('checkbox', { name: /I checked/ }).check();
   await page.getByRole('button', { name: 'Publish task' }).click();
   await expect(page.getByRole('status')).toContainText('Published');
-  await page.getByRole('button', { name: 'Today’s tasks', exact: true }).click();
+  await page.getByRole('button', { name: 'Worker', exact: true }).click();
   await page.getByRole('button', { name: 'Español', exact: true }).click();
   const card = page.getByRole('article', { name: 'Revisar protectores antes del almuerzo' });
   await expect(card).toContainText('North Shed');
   await card.getByRole('button', { name: 'Empezar', exact: true }).click();
   await card.getByRole('button', { name: 'Marcar terminada' }).click();
   await expect(card).toContainText('Terminada');
-  await page.getByRole('button', { name: 'Planificar trabajo', exact: true }).click();
+  await page.getByRole('button', { name: 'Gestión', exact: true }).click();
   await expect(page.getByRole('article', { name: 'Check guards before lunch' })).toContainText(
     'Done',
   );
@@ -120,7 +108,7 @@ test('review, publish, complete in Spanish, then see management progress without
 
 test('draft survives reload and a failed publication keeps the editor intact', async ({ page }) => {
   const api = await mockWorkspace(page);
-  await page.getByRole('button', { name: 'Prepare a task' }).click();
+  await page.getByRole('button', { name: '+ New task' }).click();
   await page.getByLabel('Your rough note').fill('Check the walnut guards by the gate.');
   await page.reload();
   await page.getByRole('button', { name: 'Continue draft' }).click();
@@ -134,19 +122,19 @@ test('draft survives reload and a failed publication keeps the editor intact', a
   api.failSaving();
   await page.getByRole('button', { name: 'Publish task' }).click();
   await expect(
-    page.getByRole('region', { name: 'Review the instructions' }).getByRole('alert'),
+    page.getByRole('region', { name: 'Make it clear before it goes out.' }).getByRole('alert'),
   ).toContainText('Your draft has been kept');
   await expect(page.getByLabel('Where is the work?')).toHaveValue('Gate');
 });
 
 test('worker reports a blocker that management can see', async ({ page }) => {
   const api = await mockWorkspace(page);
-  await page.getByRole('button', { name: 'Today’s tasks', exact: true }).click();
+  await page.getByRole('button', { name: 'Worker', exact: true }).click();
   const card = page.getByRole('article', { name: EXAMPLES[0].english.title });
   await card.getByRole('button', { name: 'Need help' }).click();
   await card.getByLabel('What do you need to continue?').fill('The north shed is locked.');
-  await card.getByRole('button', { name: 'Send help request' }).click();
-  await page.getByRole('button', { name: 'Plan work', exact: true }).click();
+  await card.getByRole('button', { name: 'Send to manager' }).click();
+  await page.getByRole('button', { name: 'Management', exact: true }).click();
   await page.getByRole('button', { name: 'Needs help 1', exact: true }).click();
   await expect(page.getByRole('article')).toHaveCount(1);
   await expect(page.getByRole('article')).toContainText('The north shed is locked.');
@@ -179,9 +167,9 @@ test('layout fits the viewport and Spanish worker view is localized', async ({
 }, testInfo) => {
   await mockWorkspace(page);
   await page.screenshot({ path: testInfo.outputPath('management.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Today’s tasks', exact: true }).click();
+  await page.getByRole('button', { name: 'Worker', exact: true }).click();
   await page.getByRole('button', { name: 'Español', exact: true }).click();
-  await expect(page.getByRole('heading', { name: 'Tareas de hoy.' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'El trabajo de hoy.' })).toBeVisible();
   await expect(page.getByRole('button', { name: 'All tasks' })).toHaveCount(0);
   expect(
     await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
@@ -194,102 +182,4 @@ test('server rejects live capture even when the request is made directly', async
     const response = await request.post('/api/' + endpoint, { data: {} });
     expect(response.status()).toBe(503);
   }
-});
-
-test('German instructions can be edited, published, completed and retained after reload', async ({
-  page,
-}, testInfo) => {
-  test.setTimeout(90000);
-  const api = await mockWorkspace(page);
-  await page.getByRole('button', { name: 'Try a translated example' }).click();
-  await page
-    .getByRole('group', { name: 'English', exact: true })
-    .getByLabel('What needs doing?')
-    .fill('Check guards for the German handoff');
-  const german = page.getByRole('group', { name: 'Deutsch', exact: true });
-  await german.getByLabel('Was ist zu tun?').fill('Baumschutz vor Mittag prüfen');
-  await german.getByLabel('Material und Aufbewahrungsort').fill('Bindematerial: Office');
-  await page.getByRole('checkbox', { name: /I checked/ }).check();
-  await page.getByRole('button', { name: 'Publish task', exact: true }).click();
-  await expect(page.getByRole('status')).toContainText('Published');
-  await page.getByRole('button', { name: 'Today’s tasks', exact: true }).click();
-  await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
-  const card = page.getByRole('article', { name: 'Baumschutz vor Mittag prüfen' });
-  await expect(card).toContainText('Bindematerial: Office');
-  await card.getByRole('button', { name: 'Aufgabe beginnen' }).click();
-  await card.getByRole('button', { name: 'Als erledigt markieren' }).click();
-  await expect(card).toContainText('Erledigt');
-  await page.reload();
-  await expect(page.getByRole('heading', { name: 'Heutige Aufgaben.' })).toBeVisible();
-  await expect(card).toContainText('Erledigt');
-  expect(
-    await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth),
-  ).toBeTruthy();
-  await page.screenshot({ path: testInfo.outputPath('tasks-de.png'), fullPage: true });
-  await page.getByRole('button', { name: 'Arbeit planen', exact: true }).click();
-  await expect(
-    page.getByRole('article', { name: 'Check guards for the German handoff', exact: true }),
-  ).toContainText('Done');
-  expect(api.paidRequests).toEqual([]);
-});
-test('missing German is explicit and cannot start work, while help is still available', async ({
-  page,
-}) => {
-  const api = await mockWorkspace(page);
-  await page
-    .getByRole('article', { name: EXAMPLES[0].english.title })
-    .getByRole('button', { name: 'Edit instructions' })
-    .click();
-  await page.getByRole('checkbox', { name: 'Include German instructions' }).uncheck();
-  await page.getByRole('checkbox', { name: /I checked/ }).check();
-  await page.getByRole('button', { name: 'Publish changes' }).click();
-  await expect(page.getByRole('status')).toContainText('Published');
-  await page.getByRole('button', { name: 'Today’s tasks', exact: true }).click();
-  await page.getByRole('button', { name: 'Deutsch', exact: true }).click();
-  const card = page.getByRole('article', { name: EXAMPLES[0].english.title });
-  await expect(card).toContainText('Die deutschen Anweisungen sind noch nicht verfügbar');
-  await expect(card.getByRole('button', { name: 'Aufgabe beginnen' })).toBeDisabled();
-  await card.getByText('Englisches Original anzeigen').click();
-  await expect(card.getByText('Where: East fence')).toBeVisible();
-  await card.getByRole('button', { name: 'Hilfe benötigt', exact: true }).click();
-  await card
-    .getByLabel('Was brauchst du, um weiterzumachen?')
-    .fill('Bitte deutsche Anweisungen ergänzen.');
-  await card.getByRole('button', { name: 'Hilfe anfragen' }).click();
-  await expect(card).toContainText('Bitte deutsche Anweisungen ergänzen.');
-  expect(api.paidRequests).toEqual([]);
-});
-
-test('recording is explicit, quota feedback is clear, and saved playback needs no generation', async ({
-  page,
-}) => {
-  test.setTimeout(90000);
-  await mockWorkspace(page);
-  let generations = 0;
-  let cached = false;
-  // A tiny WAV fixture; no provider call is made by this browser test.
-  const wav = Buffer.from('UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=', 'base64');
-  await page.route('**/api/task-audio/create', async (route) => {
-    generations++;
-    if (generations === 1)
-      await route.fulfill({ status: 429, json: { error: 'Allowance reached' } });
-    else {
-      cached = true;
-      await route.fulfill({ contentType: 'audio/wav', body: wav });
-    }
-  });
-  await page.route('**/api/task-audio', async (route) => {
-    if (cached) await route.fulfill({ contentType: 'audio/wav', body: wav });
-    else await route.fulfill({ json: { available: false } });
-  });
-  const card = page.getByRole('article', { name: EXAMPLES[0].english.title });
-  expect(generations).toBe(0);
-  await card.getByRole('button', { name: 'Create recording', exact: true }).click();
-  await expect(card.getByRole('alert')).toContainText('New recordings are unavailable right now');
-  await card.getByRole('button', { name: 'Create recording', exact: true }).click();
-  await expect(card.locator('audio')).toBeVisible();
-  await expect(card.getByRole('button', { name: 'Create recording' })).toHaveCount(0);
-  await page.reload();
-  await expect(card.locator('audio')).toBeVisible();
-  expect(generations).toBe(2);
 });

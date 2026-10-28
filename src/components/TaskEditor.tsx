@@ -1,6 +1,4 @@
 'use client';
-import { Button } from '@/components/ui/button';
-import { ArrowRight, X } from 'lucide-react';
 import { useState } from 'react';
 import { SPECIES, type Species } from '@/lib/briefing';
 import { EXAMPLES, type Instructions, type WorkDraft } from '@/lib/work-order';
@@ -9,7 +7,6 @@ const fields: {
   key: keyof Instructions;
   label: string;
   es: string;
-  de: string;
   limit: number;
   placeholder: string;
 }[] = [
@@ -17,7 +14,6 @@ const fields: {
     key: 'title',
     label: 'What needs doing?',
     es: '¿Qué hay que hacer?',
-    de: 'Was ist zu tun?',
     limit: 120,
     placeholder: 'Check the tree guards',
   },
@@ -25,7 +21,6 @@ const fields: {
     key: 'location',
     label: 'Where is the work?',
     es: '¿Dónde está el trabajo?',
-    de: 'Wo ist die Arbeit?',
     limit: 60,
     placeholder: 'East fence',
   },
@@ -33,7 +28,6 @@ const fields: {
     key: 'materialsLocation',
     label: 'Materials and where to find them',
     es: 'Materiales y dónde encontrarlos',
-    de: 'Material und Aufbewahrungsort',
     limit: 160,
     placeholder: 'Spare stakes and ties: North Shed',
   },
@@ -41,7 +35,6 @@ const fields: {
     key: 'doneWhen',
     label: 'Finished when…',
     es: 'Se termina cuando…',
-    de: 'Erledigt, wenn…',
     limit: 120,
     placeholder: 'Every guard checked; unresolved damage reported.',
   },
@@ -89,22 +82,24 @@ export default function TaskEditor({
       <div className="section-top">
         <div>
           <p className="eyebrow">{draft.taskId ? 'EDIT INSTRUCTIONS' : 'PREPARE A TASK'}</p>
-          <h2 id="editor-title">{step === 1 ? 'Describe the task' : 'Review the instructions'}</h2>
+          <h2 id="editor-title">
+            {step === 1 ? 'Start with what you know.' : 'Make it clear before it goes out.'}
+          </h2>
         </div>
-        <Button className="quiet" onClick={onClose} disabled={saving}>
-          Close <X size={16} aria-hidden="true" />
-        </Button>
+        <button className="quiet" onClick={onClose} disabled={saving}>
+          Close <span aria-hidden="true">×</span>
+        </button>
       </div>
       <ol className="steps" aria-label="Task preparation">
         <li className={step === 1 ? 'active' : ''}>
-          <Button onClick={() => setStep(1)} disabled={saving}>
+          <button onClick={() => setStep(1)} disabled={saving}>
             <span>1</span> Your note
-          </Button>
+          </button>
         </li>
         <li className={step === 2 ? 'active' : ''}>
-          <Button onClick={next} disabled={saving || (!draft.note.trim() && !draft.english.title)}>
+          <button onClick={next} disabled={saving || (!draft.note.trim() && !draft.english.title)}>
             <span>2</span> Review & publish
-          </Button>
+          </button>
         </li>
       </ol>
       {step === 1 ? (
@@ -121,24 +116,24 @@ export default function TaskEditor({
               placeholder="What needs doing, where, and where can the crew find the materials?"
             />
             <p className="muted">
-              Include the work, location, materials, and what counts as finished. You can edit every
-              field before publishing.
+              A few details are enough to start. You’ll edit the instructions before anyone sees
+              them.
             </p>
-            <Button
+            <button
               className="primary"
               onClick={next}
               disabled={!draft.note.trim() && !draft.english.title}
             >
-              Review instructions <ArrowRight size={16} aria-hidden="true" />
-            </Button>
+              Review instructions <span aria-hidden="true">→</span>
+            </button>
           </div>
           <aside className="example-box">
-            <span className="eyebrow">EXAMPLE TASK</span>
-            <h3>Check tree guards</h3>
+            <span className="eyebrow">TRY THE HANDOFF</span>
+            <h3>A ready-made bilingual example</h3>
             <p>
               Tree guards need checking along the east fence. Stakes and ties are in the north shed.
             </p>
-            <Button
+            <button
               className="secondary"
               disabled={!!draft.note.trim() || !!draft.english.title}
               onClick={() => {
@@ -146,10 +141,10 @@ export default function TaskEditor({
                 setStep(2);
               }}
             >
-              Use example <ArrowRight size={16} aria-hidden="true" />
-            </Button>
+              Use example →
+            </button>
             <small>
-              Includes prepared English, Spanish and German wording. Start an empty draft to use it.
+              Includes prepared English and Spanish wording. Start an empty draft to use it.
             </small>
           </aside>
         </div>
@@ -185,65 +180,32 @@ export default function TaskEditor({
             <label className="check-label">
               <input
                 type="checkbox"
-                checked={draft.includeSpanish}
-                onChange={(e) => change({ ...draft, includeSpanish: e.target.checked })}
+                checked={draft.bilingual}
+                onChange={(e) => change({ ...draft, bilingual: e.target.checked })}
               />
               Include Spanish instructions
             </label>
-            <label className="check-label">
-              <input
-                type="checkbox"
-                checked={draft.includeGerman}
-                onChange={(e) => change({ ...draft, includeGerman: e.target.checked })}
-              />
-              Include German instructions
-            </label>
           </div>
-          <div
-            className={
-              draft.includeSpanish || draft.includeGerman
-                ? 'translation-grid'
-                : 'translation-grid single'
-            }
-          >
-            {(
-              [
-                'english',
-                ...(draft.includeSpanish ? ['spanish'] : []),
-                ...(draft.includeGerman ? ['german'] : []),
-              ] as ('english' | 'spanish' | 'german')[]
-            ).map((language) => (
-              <fieldset
-                key={language}
-                lang={language === 'german' ? 'de' : language === 'spanish' ? 'es' : 'en'}
-              >
-                <legend>
-                  {language === 'german'
-                    ? 'Deutsch'
-                    : language === 'english'
-                      ? 'English'
-                      : 'Español'}
-                </legend>
+          <div className={draft.bilingual ? 'translation-grid' : 'translation-grid single'}>
+            {(['english', ...(draft.bilingual ? ['spanish'] : [])] as const).map((language) => (
+              <fieldset key={language} lang={language === 'spanish' ? 'es' : 'en'}>
+                <legend>{language === 'english' ? 'English' : 'Español'}</legend>
                 {fields.map((field) => (
                   <label key={field.key}>
-                    {language === 'german'
-                      ? field.de
-                      : language === 'english'
-                        ? field.label
-                        : field.es}
+                    {language === 'english' ? field.label : field.es}
                     <input
-                      value={draft[language][field.key]}
+                      value={draft[language as 'english' | 'spanish'][field.key]}
                       maxLength={field.limit}
                       required={
                         field.key !== 'materialsLocation' ||
-                        (language !== 'english' && !!draft.english.materialsLocation)
+                        (language === 'spanish' && !!draft.english.materialsLocation)
                       }
                       placeholder={language === 'english' ? field.placeholder : ''}
                       onChange={(e) =>
                         change({
                           ...draft,
                           [language]: {
-                            ...draft[language],
+                            ...draft[language as 'english' | 'spanish'],
                             [field.key]: e.target.value,
                           },
                         })
@@ -254,10 +216,10 @@ export default function TaskEditor({
               </fieldset>
             ))}
           </div>
-          {(draft.includeSpanish || draft.includeGerman) && (
+          {draft.bilingual && (
             <p className="muted">
-              Keep names on signs, such as “North Shed,” recognizable in every language. Have a
-              fluent speaker check translated instructions before real field use.
+              Keep names on signs, such as “North Shed,” recognizable in both languages. Have a
+              fluent speaker check Spanish instructions before real field use.
             </p>
           )}
           <label className="check-label review-check">
@@ -267,7 +229,7 @@ export default function TaskEditor({
               onChange={(e) => setReviewed(e.target.checked)}
             />
             I checked the action, location, materials and completion instructions
-            {draft.includeSpanish || draft.includeGerman ? ' in every included language' : ''}.
+            {draft.bilingual ? ' in both languages' : ''}.
           </label>
           {error && (
             <p className="error" role="alert">
@@ -276,20 +238,20 @@ export default function TaskEditor({
           )}
           <div className="editor-footer">
             <div>
-              <strong>Review the text before sharing it.</strong>
+              <strong>Text will be ready for the crew.</strong>
               <small>Publishing shares the text. It won’t create a new recording.</small>
             </div>
-            <Button className="primary" type="submit" disabled={saving || !reviewed}>
-              {saving ? 'Publishing…' : draft.taskId ? 'Publish changes' : 'Publish task'}
-            </Button>
+            <button className="primary" type="submit" disabled={saving || !reviewed}>
+              {saving ? 'Publishing…' : draft.taskId ? 'Publish changes →' : 'Publish task →'}
+            </button>
           </div>
         </form>
       )}
       <div className="draft-footer">
         <small>Draft saved on this device when browser storage is available.</small>
-        <Button className="text-button" onClick={onDiscard} disabled={saving}>
+        <button className="text-button" onClick={onDiscard} disabled={saving}>
           Discard draft
-        </Button>
+        </button>
       </div>
     </section>
   );

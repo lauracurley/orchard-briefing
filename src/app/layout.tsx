@@ -9,7 +9,7 @@ import './globals.css';
 export const metadata: Metadata = {
   title: 'Orchard Briefing',
   description:
-    'Clear instructions for your orchard crew—in English, Spanish and German. Prepare tasks, find materials, and keep everyone up to date.',
+    'Clear instructions for your orchard crew—in English and Spanish. Prepare tasks, find materials, and keep everyone up to date.',
 };
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {

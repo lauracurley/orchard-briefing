@@ -52,13 +52,4 @@ await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS spanish jsonb`;
 await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS work_status text NOT NULL DEFAULT 'ready' CHECK (work_status IN ('ready', 'doing', 'blocked', 'done'))`;
 await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS help_note text NOT NULL DEFAULT ''`;
 await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS revision integer NOT NULL DEFAULT 1`;
-await sql`ALTER TABLE tasks ADD COLUMN IF NOT EXISTS german jsonb`;
-await sql`CREATE TABLE IF NOT EXISTS task_audio_budget (
-  id integer PRIMARY KEY CHECK (id = 1),
-  day date NOT NULL,
-  daily_requests integer NOT NULL CHECK (daily_requests BETWEEN 0 AND 6),
-  daily_characters integer NOT NULL CHECK (daily_characters BETWEEN 0 AND 1200),
-  month date NOT NULL,
-  monthly_characters integer NOT NULL CHECK (monthly_characters BETWEEN 0 AND 4000)
-)`;
 console.log('Database ready');

@@ -1,6 +1,6 @@
 import type { WorkTask } from './work-order';
 export const TASK_FIELDS =
-  'id species title location materialsLocation doneWhen done spanish { title location materialsLocation doneWhen } german { title location materialsLocation doneWhen } status helpNote revision';
+  'id species title location materialsLocation doneWhen done spanish { title location materialsLocation doneWhen } status helpNote revision';
 export async function query<T>(source: string, variables: Record<string, unknown>): Promise<T> {
   const response = await fetch('/api/graphql', {
     method: 'POST',
