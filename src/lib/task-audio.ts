@@ -1,3 +1,4 @@
+import { createAudioBatch, type BatchAudioStore } from './audio-batch';
 import { randomUUID } from 'node:crypto';
 import { db, validOrchardId } from './db';
 import { EXAMPLES, spokenTask, type Language, type WorkTask } from './work-order';
@@ -7,8 +8,6 @@ import {
   BRIEFING_FORMAT,
   BRIEFING_MODEL,
   briefingAudioKey,
-  getOrCreateBriefingAudio,
-  type AudioStore,
 } from './briefing-audio';
 
 export const TASK_AUDIO_LIMITS = {
@@ -49,9 +48,13 @@ export function taskAudioIdentity(
   };
 }
 
-function audioResponse(audio: Uint8Array) {
+function audioResponse(audio: Uint8Array, complete: boolean) {
   return new Response(Uint8Array.from(audio), {
-    headers: { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' },
+    headers: {
+      'Content-Type': 'audio/mpeg',
+      'Cache-Control': 'no-store',
+      'X-Recordings-Complete': String(complete),
+    },
   });
 }
 
@@ -81,39 +84,60 @@ export async function serveTaskAudio(request: Request, generate: boolean) {
     const row = rows[0];
     if (row.revision !== revision)
       return Response.json({ error: 'Task changed. Refresh before listening.' }, { status: 409 });
-    const text = spokenTask(
-      { ...row, materialsLocation: row.materials_location, doneWhen: row.done_when } as WorkTask,
-      language,
-    );
-    if (!text)
-      return Response.json(
-        { available: false, error: 'Translation required.' },
-        { status: generate ? 422 : 200 },
-      );
+    const task = {
+      ...row,
+      materialsLocation: row.materials_location,
+      doneWhen: row.done_when,
+    } as WorkTask;
     const voice = process.env.ELEVENLABS_VOICE_ID ?? '';
-    const { key, shared } = taskAudioIdentity(orchardId, text, language, voice);
-    const cached =
-      await sql`SELECT audio_base64 FROM briefing_audio_cache WHERE cache_key = ${key} AND audio_base64 IS NOT NULL`;
-    if (cached.length) return audioResponse(Buffer.from(cached[0].audio_base64, 'base64'));
-    if (!generate) return Response.json({ available: false });
+    const recordings = (['en', 'es', 'de'] as const).map((language) => {
+      const text = spokenTask(task, language) ?? '';
+      return { language, text, ...taskAudioIdentity(orchardId, text, language, voice) };
+    });
+    const saved = await Promise.all(
+      recordings.map(async (recording) => {
+        if (!recording.text) return null;
+        const cached =
+          await sql`SELECT audio_base64 FROM briefing_audio_cache WHERE cache_key = ${recording.key} AND audio_base64 IS NOT NULL`;
+        return cached[0]?.audio_base64 ?? null;
+      }),
+    );
+    const complete = saved.every((audio) => audio !== null);
+    const selected = saved[recordings.findIndex((recording) => recording.language === language)];
+    if (!generate || complete) {
+      if (selected !== null) return audioResponse(Buffer.from(selected, 'base64'), complete);
+      return Response.json({ available: false, complete });
+    }
+    if (recordings.some((recording) => !recording.text))
+      return Response.json(
+        {
+          code: 'translations_required',
+          error: 'Add instructions in all three languages before creating recordings.',
+        },
+        { status: 422 },
+      );
     const apiKey = process.env.ELEVENLABS_API_KEY;
     if (!apiKey || !voice || process.env.ELEVENLABS_TASK_AUDIO_ENABLED === 'false')
       return Response.json({ error: 'Recording is temporarily unavailable.' }, { status: 503 });
-    if (text.length > TASK_AUDIO_LIMITS.perRecordingCharacters)
+    if (
+      recordings.some(
+        (recording) => recording.text.length > TASK_AUDIO_LIMITS.perRecordingCharacters,
+      )
+    )
       return Response.json(
         { code: 'instructions_too_long', error: 'Shorten the instructions before recording.' },
         { status: 422 },
       );
-    const store: AudioStore = {
+    const store: BatchAudioStore = {
       async load(cacheKey) {
         const result =
           await sql`SELECT audio_base64 FROM briefing_audio_cache WHERE cache_key = ${cacheKey} AND audio_base64 IS NOT NULL`;
         return result[0]?.audio_base64 ?? null;
       },
-      async claim(cacheKey, owner) {
+      async claim(recording, owner) {
         const result =
           await sql`INSERT INTO briefing_audio_cache (cache_key, owner_token, orchard_id)
-          VALUES (${cacheKey}, ${owner}, ${shared ? null : orchardId})
+          VALUES (${recording.key}, ${owner}, ${recording.shared ? null : orchardId})
           ON CONFLICT (cache_key) DO UPDATE SET owner_token = EXCLUDED.owner_token, reserved_at = now()
           WHERE briefing_audio_cache.audio_base64 IS NULL AND briefing_audio_cache.reserved_at < now() - interval '60 seconds'
           RETURNING cache_key`;
@@ -128,31 +152,33 @@ export async function serveTaskAudio(request: Request, generate: boolean) {
       async release(cacheKey, owner) {
         await sql`DELETE FROM briefing_audio_cache WHERE cache_key = ${cacheKey} AND owner_token = ${owner} AND audio_base64 IS NULL`;
       },
-      async reserveQuota() {
+      async reserve(requests, characters) {
+        if (
+          requests > TASK_AUDIO_LIMITS.dailyRequests ||
+          characters > TASK_AUDIO_LIMITS.dailyCharacters
+        )
+          return false;
         // A single atomic row update serializes reservations across all visitors and server instances.
         const result =
           await sql`INSERT INTO task_audio_budget (id, day, daily_requests, daily_characters, month, monthly_characters)
-          VALUES (1, (now() AT TIME ZONE 'UTC')::date, 1, ${text.length}, date_trunc('month', now() AT TIME ZONE 'UTC')::date, ${text.length})
+          VALUES (1, (now() AT TIME ZONE 'UTC')::date, ${requests}, ${characters}, date_trunc('month', now() AT TIME ZONE 'UTC')::date, ${characters})
           ON CONFLICT (id) DO UPDATE SET
             day = EXCLUDED.day,
-            daily_requests = CASE WHEN task_audio_budget.day = EXCLUDED.day THEN task_audio_budget.daily_requests + 1 ELSE 1 END,
+            daily_requests = CASE WHEN task_audio_budget.day = EXCLUDED.day THEN task_audio_budget.daily_requests + EXCLUDED.daily_requests ELSE EXCLUDED.daily_requests END,
             daily_characters = CASE WHEN task_audio_budget.day = EXCLUDED.day THEN task_audio_budget.daily_characters + EXCLUDED.daily_characters ELSE EXCLUDED.daily_characters END,
             month = EXCLUDED.month,
             monthly_characters = CASE WHEN task_audio_budget.month = EXCLUDED.month THEN task_audio_budget.monthly_characters + EXCLUDED.monthly_characters ELSE EXCLUDED.monthly_characters END
-          WHERE (CASE WHEN task_audio_budget.day = EXCLUDED.day THEN task_audio_budget.daily_requests ELSE 0 END) < ${TASK_AUDIO_LIMITS.dailyRequests}
+          WHERE (CASE WHEN task_audio_budget.day = EXCLUDED.day THEN task_audio_budget.daily_requests ELSE 0 END) + EXCLUDED.daily_requests <= ${TASK_AUDIO_LIMITS.dailyRequests}
             AND (CASE WHEN task_audio_budget.day = EXCLUDED.day THEN task_audio_budget.daily_characters ELSE 0 END) + EXCLUDED.daily_characters <= ${TASK_AUDIO_LIMITS.dailyCharacters}
             AND (CASE WHEN task_audio_budget.month = EXCLUDED.month THEN task_audio_budget.monthly_characters ELSE 0 END) + EXCLUDED.monthly_characters <= ${TASK_AUDIO_LIMITS.monthlyCharacters}
           RETURNING id`;
-        return result.length ? 'reserved' : null;
-      },
-      async refundQuota() {
-        // Conservatively retain the reservation: a timeout may still have consumed provider credits.
+        return result.length > 0;
       },
     };
-    const audio = await getOrCreateBriefingAudio(
-      key,
+    const audio = await createAudioBatch(
+      recordings,
       store,
-      async () => {
+      async ({ text }) => {
         const upstream = await fetch(
           `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(voice)}?output_format=${BRIEFING_FORMAT}`,
           {
@@ -165,9 +191,9 @@ export async function serveTaskAudio(request: Request, generate: boolean) {
         if (!upstream.ok) throw new Error('Speech provider unavailable.');
         return new Uint8Array(await upstream.arrayBuffer());
       },
-      { owner: randomUUID() },
+      randomUUID(),
     );
-    return audioResponse(audio);
+    return audioResponse(audio.get(language as Language)!, true);
   } catch (error) {
     if (error instanceof AudioQuotaError)
       return Response.json(

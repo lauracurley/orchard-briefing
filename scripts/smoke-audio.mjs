@@ -1,4 +1,4 @@
-// Opt-in LIVE test: may create one short public example recording per selected language.
+// Opt-in LIVE test: one action may create all three short public example recordings.
 // Normal CI and the text smoke test never run this script.
 import assert from 'node:assert/strict';
 import { randomUUID, createHash } from 'node:crypto';
@@ -8,9 +8,7 @@ if (!base || process.env.ORCHARD_ALLOW_PAID_SMOKE !== 'true')
   throw new Error(
     'Set ORCHARD_SMOKE_URL and explicitly set ORCHARD_ALLOW_PAID_SMOKE=true. This test can consume speech credits.',
   );
-const languages = (process.env.ORCHARD_AUDIO_LANGUAGES ?? 'de').split(',');
-if (languages.some((language) => !['en', 'es', 'de'].includes(language)))
-  throw new Error('Unsupported language.');
+const languages = ['en', 'es', 'de'];
 async function post(path, body) {
   return fetch(new URL(path, base), {
     method: 'POST',
@@ -35,13 +33,12 @@ async function example() {
 const first = await example();
 const second = await example();
 const digest = (bytes) => createHash('sha256').update(bytes).digest('hex');
+// A request from any language must prepare the full set, including when its own audio exists.
+const created = await post('/api/task-audio/create', { ...first, language: 'de' });
+assert.equal(created.status, 200, 'Creating the three-language set failed');
+assert.equal(created.headers.get('x-recordings-complete'), 'true');
 for (const language of languages) {
-  let recording = await post('/api/task-audio', { ...first, language });
-  let generated = false;
-  if (!recording.headers.get('content-type')?.includes('audio/')) {
-    recording = await post('/api/task-audio/create', { ...first, language });
-    generated = true;
-  }
+  const recording = await post('/api/task-audio', { ...first, language });
   assert.equal(recording.status, 200, `Recording failed for ${language}`);
   assert.ok(recording.headers.get('content-type')?.includes('audio/'));
   const bytes = Buffer.from(await recording.arrayBuffer());
@@ -51,6 +48,6 @@ for (const language of languages) {
   assert.ok(replay.headers.get('content-type')?.includes('audio/'));
   assert.equal(digest(Buffer.from(await replay.arrayBuffer())), digest(bytes));
   console.log(
-    `${language}: ${generated ? 'created one example recording' : 'reused existing recording'}; another workspace received identical cached audio.`,
+    `${language}: available after one creation action; another workspace received identical cached audio.`,
   );
 }
