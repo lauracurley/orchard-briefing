@@ -1,5 +1,5 @@
-// Deliberate release gate. Change only after an approved live-integration test plan.
-// Environment variables alone cannot enable spending in this UX preview release.
+// Legacy whole-list synthesis, transcription and agents remain off.
+// Task speech uses its own explicit action and database-enforced shared budget.
 export function liveVoiceEnabled(): boolean {
   return false;
 }
