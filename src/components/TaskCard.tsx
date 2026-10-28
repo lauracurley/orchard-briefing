@@ -36,9 +36,9 @@ export default function TaskCard({
   const [helpNote, setHelpNote] = useState('');
   const [audio, setAudio] = useState<string | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [generationError, setGenerationError] = useState<'limit' | 'changed' | 'failed' | null>(
-    null,
-  );
+  const [generationError, setGenerationError] = useState<
+    'limit' | 'changed' | 'tooLong' | 'failed' | null
+  >(null);
   const audioUrl = useRef<string | null>(null);
   const version = useRef(0);
   useEffect(() => {
@@ -89,8 +89,16 @@ export default function TaskCard({
       });
       if (requestedVersion !== version.current) return;
       if (!response.ok || !response.headers.get('Content-Type')?.includes('audio/')) {
+        const error = await response.json().catch(() => null);
+        if (requestedVersion !== version.current) return;
         setGenerationError(
-          response.status === 429 ? 'limit' : response.status === 409 ? 'changed' : 'failed',
+          response.status === 422 && error?.code === 'instructions_too_long'
+            ? 'tooLong'
+            : response.status === 429
+              ? 'limit'
+              : response.status === 409
+                ? 'changed'
+                : 'failed',
         );
         return;
       }
@@ -181,7 +189,9 @@ export default function TaskCard({
                 ? copy.recordingLimit
                 : generationError === 'changed'
                   ? copy.recordingChanged
-                  : copy.recordingFailed}
+                  : generationError === 'tooLong'
+                    ? copy.recordingTooLong
+                    : copy.recordingFailed}
             </p>
           )}
         </div>

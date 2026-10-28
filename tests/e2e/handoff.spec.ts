@@ -272,6 +272,8 @@ test('recording is explicit, quota feedback is clear, and saved playback needs n
   await page.route('**/api/task-audio/create', async (route) => {
     generations++;
     if (generations === 1)
+      await route.fulfill({ status: 422, json: { code: 'instructions_too_long' } });
+    else if (generations === 2)
       await route.fulfill({ status: 429, json: { error: 'Allowance reached' } });
     else {
       cached = true;
@@ -285,11 +287,13 @@ test('recording is explicit, quota feedback is clear, and saved playback needs n
   const card = page.getByRole('article', { name: EXAMPLES[0].english.title });
   expect(generations).toBe(0);
   await card.getByRole('button', { name: 'Create recording', exact: true }).click();
+  await expect(card.getByRole('alert')).toContainText('Shorten them in Plan work');
+  await card.getByRole('button', { name: 'Create recording', exact: true }).click();
   await expect(card.getByRole('alert')).toContainText('New recordings are unavailable right now');
   await card.getByRole('button', { name: 'Create recording', exact: true }).click();
   await expect(card.locator('audio')).toBeVisible();
   await expect(card.getByRole('button', { name: 'Create recording' })).toHaveCount(0);
   await page.reload();
   await expect(card.locator('audio')).toBeVisible();
-  expect(generations).toBe(2);
+  expect(generations).toBe(3);
 });

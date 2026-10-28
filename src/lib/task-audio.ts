@@ -101,7 +101,7 @@ export async function serveTaskAudio(request: Request, generate: boolean) {
       return Response.json({ error: 'Recording is temporarily unavailable.' }, { status: 503 });
     if (text.length > TASK_AUDIO_LIMITS.perRecordingCharacters)
       return Response.json(
-        { error: 'Shorten the instructions before recording.' },
+        { code: 'instructions_too_long', error: 'Shorten the instructions before recording.' },
         { status: 422 },
       );
     const store: AudioStore = {
@@ -172,7 +172,8 @@ export async function serveTaskAudio(request: Request, generate: boolean) {
     if (error instanceof AudioQuotaError)
       return Response.json(
         {
-          error: 'The demo recording allowance is used up. Saved recordings can still be replayed.',
+          error:
+            'New recordings are unavailable right now. Existing recordings can still be played.',
         },
         { status: 429 },
       );

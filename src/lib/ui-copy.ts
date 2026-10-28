@@ -12,6 +12,11 @@ const messages = {
     es: 'No se pueden crear grabaciones ahora. Puedes escuchar las que ya están guardadas.',
     de: 'Neue Aufnahmen sind gerade nicht verfügbar. Vorhandene Aufnahmen kannst du weiter anhören.',
   },
+  recordingTooLong: {
+    en: 'These instructions are too long to record. Shorten them in Plan work and try again.',
+    es: 'Las instrucciones son demasiado largas para grabarlas. Acórtalas en Planificar trabajo e inténtalo de nuevo.',
+    de: 'Diese Anweisungen sind zu lang für eine Aufnahme. Kürze sie unter „Arbeit planen“ und versuche es erneut.',
+  },
   recordingFailed: {
     en: 'Couldn’t create this recording. Please try again later.',
     es: 'No se pudo crear la grabación. Inténtalo más tarde.',
