@@ -1,6 +1,6 @@
 # ElevenAgents task-drafting configuration
 
-This document preserves the integration contract for a future speech release. The current bilingual preview has no agent client session and locks provider calls off in `src/lib/voice-policy.ts`; setting an environment flag cannot override that lock. Reconnect and verify the client tool only after an approved live test plan.
+This document preserves the integration contract for a future voice-capture release. The current multilingual demo has no agent client session and locks legacy capture and agent calls off in `src/lib/voice-policy.ts`; setting an environment flag cannot override that lock. Reconnect and verify the client tool only after an approved live test plan.
 
 This document is for maintainers. The product interface uses plain orchard language.
 

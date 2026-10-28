@@ -1,4 +1,7 @@
 'use client';
+import { uiCopy } from '@/lib/ui-copy';
+import { Button } from '@/components/ui/button';
+import { ArrowRight, ArrowUpRight, Check, Plus, RefreshCw, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   emptyDraft,
@@ -22,6 +25,13 @@ const FILTERS = {
     doing: 'In progress',
     blocked: 'Needs help',
     done: 'Done',
+  },
+  de: {
+    all: 'Alle Aufgaben',
+    ready: 'Bereit',
+    doing: 'In Arbeit',
+    blocked: 'Hilfe benötigt',
+    done: 'Erledigt',
   },
   es: {
     all: 'Todas',
@@ -55,7 +65,7 @@ export default function OrchardApp() {
   const lastRequest = useRef(0);
   const manager = view === 'management';
   const lang: Language = manager ? 'en' : language;
-  const es = lang === 'es';
+  const copy = uiCopy(lang);
 
   const refresh = useCallback(async (id: string, initialize = false) => {
     const request = ++lastRequest.current;
@@ -83,9 +93,15 @@ export default function OrchardApp() {
       const raw = localStorage.getItem('orchard-work-draft:' + id);
       if (raw) {
         const parsed = JSON.parse(raw);
-        if (parsed.english && parsed.spanish && typeof parsed.note === 'string') setDraft(parsed);
+        if (parsed.english && parsed.spanish && typeof parsed.note === 'string')
+          setDraft({
+            ...emptyDraft(),
+            ...parsed,
+            includeSpanish: parsed.includeSpanish ?? parsed.bilingual ?? false,
+          });
       }
-      if (localStorage.getItem('orchard-language') === 'es') setLanguage('es');
+      const savedLanguage = localStorage.getItem('orchard-language');
+      if (savedLanguage === 'es' || savedLanguage === 'de') setLanguage(savedLanguage);
     } catch {
       setNotice('Browser storage is unavailable. Keep this page open to retain your draft.');
     }
@@ -167,7 +183,9 @@ export default function OrchardApp() {
         doneWhen: task.doneWhen ?? '',
       },
       spanish: task.spanish ?? emptyDraft().spanish,
-      bilingual: !!task.spanish,
+      german: task.german ?? emptyDraft().german,
+      includeGerman: !!task.german,
+      includeSpanish: !!task.spanish,
       note: '',
     });
   }
@@ -196,7 +214,8 @@ export default function OrchardApp() {
           input: {
             species: draft.species,
             english: draft.english,
-            spanish: draft.bilingual ? draft.spanish : null,
+            spanish: draft.includeSpanish ? draft.spanish : null,
+            german: draft.includeGerman ? draft.german : null,
           },
         },
       );
@@ -204,7 +223,7 @@ export default function OrchardApp() {
       setDraft(emptyDraft());
       setEditor(false);
       setFilter('all');
-      setNotice('Published. The crew can now read these instructions in Worker view.');
+      setNotice('Published. These instructions are now available in Today’s tasks.');
     } catch (reason) {
       setEditError(
         reason instanceof Error ? reason.message : 'Could not publish. Your draft has been kept.',
@@ -224,20 +243,10 @@ export default function OrchardApp() {
         { orchardId, taskId: task.id, revision: task.revision, status, helpNote },
       );
       applyTask(data.setWorkStatus);
-      setNotice(
-        es
-          ? 'Estado actualizado. El encargado puede verlo.'
-          : 'Status updated. Management can see your progress.',
-      );
+      setNotice(copy.statusUpdatedYourProgressIs);
       return true;
     } catch (reason) {
-      setError(
-        es
-          ? 'No se pudo guardar. Actualiza la lista e inténtalo de nuevo.'
-          : reason instanceof Error
-            ? reason.message
-            : 'Could not save. Please try again.',
-      );
+      setError(lang === 'en' && reason instanceof Error ? reason.message : copy.saveFailed);
       return false;
     } finally {
       setBusy(null);
@@ -252,7 +261,7 @@ export default function OrchardApp() {
   return (
     <div lang={lang}>
       <a className="skip-link" href="#work-list">
-        {es ? 'Ir a las tareas' : 'Skip to tasks'}
+        {copy.skipToTasks}
       </a>
       <header className="topbar">
         <a className="brand" href="#management" aria-label="Orchard Briefing home">
@@ -268,112 +277,89 @@ export default function OrchardApp() {
             Orchard<span className="brand-light">Briefing</span>
           </span>
         </a>
-        <nav className="view-nav" aria-label={es ? 'Vista del huerto' : 'Orchard view'}>
-          <button
+        <nav className="view-nav" aria-label={copy.orchardView}>
+          <Button
             className={manager ? 'selected' : ''}
             aria-pressed={manager}
             onClick={() => chooseView('management')}
           >
-            {es ? 'Gestión' : 'Management'}
-          </button>
-          <button
+            {copy.planWork}
+          </Button>
+          <Button
             className={!manager ? 'selected' : ''}
             aria-pressed={!manager}
             onClick={() => chooseView('worker')}
           >
-            {es ? 'Equipo' : 'Worker'}
-          </button>
+            {copy.todaySTasks}
+          </Button>
         </nav>
-        <span className="demo-badge">{es ? 'Huerto de muestra' : 'Demo orchard'}</span>
+        <span className="demo-badge">{copy.demoOrchard}</span>
       </header>
       <main className="app-shell">
         <section className="intro">
           <div>
-            <p className="eyebrow">
-              {manager
-                ? 'A CLEAR START FOR THE WHOLE CREW'
-                : es
-                  ? 'LAS INSTRUCCIONES, A MANO'
-                  : 'YOUR INSTRUCTIONS, AT HAND'}
-            </p>
-            <h1>
-              {manager ? (
-                <>
-                  Good work starts with
-                  <br />
-                  <em>clear instructions.</em>
-                </>
-              ) : es ? (
-                'El trabajo de hoy.'
-              ) : (
-                'Today’s work.'
-              )}
-            </h1>
+            <p className="eyebrow">{manager ? 'PLAN WORK' : copy.tasksEyebrow}</p>
+            <h1>{manager ? 'Prepare today’s work.' : copy.tasksHeading}</h1>
             <p>
               {manager
-                ? 'Prepare the work in English and Spanish. Give your crew the details they need, and see how the day is going.'
-                : es
-                  ? 'Consulta dónde ir, qué llevar y cuándo está terminado. Avisa si necesitas ayuda.'
-                  : 'Know where to go, what to bring, and what finished looks like. Ask for help when you need it.'}
+                ? 'Write the task, location, materials, and finish condition. Review each included language before publishing.'
+                : copy.taskIntro}
             </p>
           </div>
           {manager ? (
             <div className="intro-action">
-              <button className="primary" disabled={!ready} onClick={() => openEditor()}>
-                {hasDraft(draft) ? 'Continue draft' : '+ New task'}
-              </button>
-              <button
+              <Button className="primary" disabled={!ready} onClick={() => openEditor()}>
+                {hasDraft(draft) ? (
+                  'Continue draft'
+                ) : (
+                  <>
+                    <Plus size={16} aria-hidden="true" /> Prepare a task
+                  </>
+                )}
+              </Button>
+              <Button
                 className="text-button"
                 disabled={!ready}
                 onClick={() => openEditor(structuredClone(EXAMPLES[0]))}
               >
-                Try a bilingual example →
-              </button>
+                Try a translated example <ArrowRight size={16} aria-hidden="true" />
+              </Button>
             </div>
           ) : (
-            <div
-              className="language-control"
-              role="group"
-              aria-label={es ? 'Idioma de las instrucciones' : 'Instructions language'}
-            >
-              <span>{es ? 'Tu idioma' : 'Your language'}</span>
+            <div className="language-control" role="group" aria-label={copy.instructionsLanguage}>
+              <span>{copy.yourLanguage}</span>
               <div>
-                <button
+                <Button
                   aria-pressed={language === 'en'}
                   className={language === 'en' ? 'selected' : ''}
                   onClick={() => chooseLanguage('en')}
                 >
                   English
-                </button>
-                <button
+                </Button>
+                <Button
                   aria-pressed={language === 'es'}
                   className={language === 'es' ? 'selected' : ''}
                   onClick={() => chooseLanguage('es')}
                 >
                   Español
-                </button>
+                </Button>
+                <Button
+                  aria-pressed={language === 'de'}
+                  className={language === 'de' ? 'selected' : ''}
+                  onClick={() => chooseLanguage('de')}
+                >
+                  Deutsch
+                </Button>
               </div>
             </div>
           )}
         </section>
-        <div className="preview-bar">
-          <span aria-hidden="true">◖))</span>
-          <p>
-            {es
-              ? 'Vista previa: las nuevas grabaciones están en pausa. Puedes leer las tareas y actualizar su estado.'
-              : 'New recordings are paused for this preview. All text features are ready to try.'}
-          </p>
-        </div>
         {notice && (
           <div className="notice" role="status">
             <span>{notice}</span>
-            <button
-              className="quiet"
-              aria-label={es ? 'Cerrar aviso' : 'Dismiss notice'}
-              onClick={() => setNotice('')}
-            >
-              ×
-            </button>
+            <Button className="quiet" aria-label={copy.dismissNotice} onClick={() => setNotice('')}>
+              <X size={16} aria-hidden="true" />
+            </Button>
           </div>
         )}
         {manager && (
@@ -399,24 +385,17 @@ export default function OrchardApp() {
         <section id="work-list" className="work-section" aria-labelledby="work-title">
           <div className="section-top">
             <div>
-              <p className="eyebrow">
-                {manager ? 'THE CREW’S WORK LIST' : es ? 'PASO A PASO' : 'ONE TASK AT A TIME'}
-              </p>
-              <h2 id="work-title">
-                {manager
-                  ? 'Today, in the orchard.'
-                  : es
-                    ? 'Listo para empezar.'
-                    : 'Ready for the rows.'}
-              </h2>
+              <p className="eyebrow">{copy.tasksEyebrow}</p>
+              <h2 id="work-title">{manager ? 'Today’s tasks' : copy.workList}</h2>
             </div>
-            <button
+            <Button
               className="quiet refresh"
               disabled={loading || !orchardId}
               onClick={() => refresh(orchardId, !ready)}
             >
-              {loading ? (es ? 'Cargando…' : 'Loading…') : es ? '↻ Actualizar' : '↻ Refresh'}
-            </button>
+              {!loading && <RefreshCw size={16} aria-hidden="true" />}
+              {loading ? copy.loading : copy.refresh}
+            </Button>
           </div>
           {manager && (
             <div className="overview">
@@ -431,21 +410,23 @@ export default function OrchardApp() {
                 </strong>
                 <span>Completed</span>
               </div>
-              <button className={blocked ? 'has-blocked' : ''} onClick={() => setFilter('blocked')}>
+              <Button className={blocked ? 'has-blocked' : ''} onClick={() => setFilter('blocked')}>
                 <strong>{blocked}</strong>
                 <span>
-                  Need a hand <span aria-hidden="true">↗</span>
+                  Need help <ArrowUpRight size={14} aria-hidden="true" />
                 </span>
-              </button>
+              </Button>
               <div className="progress-summary">
-                <span>A little progress, every day.</span>
+                <span>
+                  {done} of {tasks.length} tasks completed
+                </span>
                 <progress value={done} max={tasks.length || 1} aria-label="Tasks completed" />
               </div>
             </div>
           )}
-          <div className="filters" role="group" aria-label={es ? 'Filtrar tareas' : 'Filter tasks'}>
+          <div className="filters" role="group" aria-label={copy.filterTasks}>
             {(Object.keys(FILTERS[lang]) as Filter[]).map((key) => (
-              <button
+              <Button
                 key={key}
                 className={filter === key ? 'selected' : ''}
                 aria-pressed={filter === key}
@@ -455,44 +436,28 @@ export default function OrchardApp() {
                 <span>
                   {key === 'all' ? tasks.length : tasks.filter((t) => t.status === key).length}
                 </span>
-              </button>
+              </Button>
             ))}
           </div>
           {error && (
             <p className="error" role="alert">
-              {es && error.startsWith('Could not load')
-                ? 'No se pudo cargar la lista. Pulsa Actualizar para intentarlo de nuevo.'
-                : error}
+              {error.startsWith('Could not load') ? copy.loadFailed : error}
             </p>
           )}
           {!ready && (
             <div className="empty-state">
-              <h3>
-                {loading
-                  ? es
-                    ? 'Cargando el trabajo…'
-                    : 'Getting the work list…'
-                  : es
-                    ? 'No se pudo cargar la lista.'
-                    : 'The work list could not be loaded.'}
-              </h3>
-              <p>
-                {es
-                  ? 'Tus cambios se guardan al publicar.'
-                  : 'Published work is saved in your demo workspace.'}
-              </p>
+              <h3>{loading ? copy.gettingTasks : copy.loadFailed}</h3>
+              <p>{copy.publishedWorkIsSavedIn}</p>
             </div>
           )}
           {ready && !shown.length && (
             <div className="empty-state">
-              <span aria-hidden="true">✓</span>
-              <h3>{es ? 'No hay tareas en esta vista.' : 'No tasks in this view.'}</h3>
+              <Check size={28} aria-hidden="true" />
+              <h3>{copy.noTasksInThisView}</h3>
               <p>
-                {es
-                  ? 'Selecciona Todas para ver la lista completa.'
-                  : manager
-                    ? 'Choose All tasks to see the whole list, or prepare a new task.'
-                    : 'Choose All tasks to see the whole list. Ask your manager if something is missing.'}
+                {manager
+                  ? 'Choose All tasks to see the whole list, or prepare a new task.'
+                  : copy.emptyHint}
               </p>
             </div>
           )}
@@ -515,31 +480,24 @@ export default function OrchardApp() {
         {manager && (
           <section className="handoff">
             <div>
-              <p className="eyebrow">SEE THE OTHER SIDE</p>
-              <h2>Ready for the crew?</h2>
+              <p className="eyebrow">TODAY’S TASKS</p>
+              <h2>See the instructions in action</h2>
               <p>
-                Switch to Worker view to read the same tasks in Spanish, start work, or send a note
-                back.
+                Open Today’s tasks to read the instructions in English, Spanish or German, start
+                work, or ask for help.
               </p>
             </div>
-            <button className="secondary" onClick={() => chooseView('worker')}>
-              Open Worker view <span aria-hidden="true">→</span>
-            </button>
+            <Button className="secondary" onClick={() => chooseView('worker')}>
+              Open Today’s tasks <ArrowRight size={16} aria-hidden="true" />
+            </Button>
           </section>
         )}
       </main>
       <footer>
-        <span>
-          Orchard Briefing <span aria-hidden="true">/</span>{' '}
-          {es ? 'Un buen comienzo, juntos.' : 'A clear start, together.'}
-        </span>
-        <p>
-          {es
-            ? 'Demo con tareas ficticias. Ambas vistas comparten la lista de este navegador; no son cuentas separadas.'
-            : 'Fictional demo. Both views share this browser’s workspace; they are not separate accounts.'}
-        </p>
+        <span>Orchard Briefing</span>
+        <p>{copy.fictionalDemoBothViewsShare}</p>
         <a href="https://elevenlabs.io" target="_blank" rel="noreferrer">
-          {es ? 'Voz con ElevenLabs' : 'Voice powered by ElevenLabs'} ↗
+          {copy.voiceCredit} <ArrowUpRight size={14} aria-hidden="true" />
         </a>
       </footer>
     </div>

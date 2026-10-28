@@ -6,8 +6,8 @@ export const runtime = 'nodejs';
 const schema = buildSchema(`
   type Instructions { title: String!, location: String!, materialsLocation: String!, doneWhen: String! }
   input InstructionsInput { title: String!, location: String!, materialsLocation: String!, doneWhen: String! }
-  input WorkInput { species: String!, english: InstructionsInput!, spanish: InstructionsInput }
-  type Task { id: ID!, species: String!, title: String!, location: String, materialsLocation: String, doneWhen: String, done: Boolean!, spanish: Instructions, status: String!, helpNote: String!, revision: Int! }
+  input WorkInput { species: String!, english: InstructionsInput!, spanish: InstructionsInput, german: InstructionsInput }
+  type Task { id: ID!, species: String!, title: String!, location: String, materialsLocation: String, doneWhen: String, done: Boolean!, spanish: Instructions, german: Instructions, status: String!, helpNote: String!, revision: Int! }
   type Query { tasks(orchardId: ID!): [Task!]! }
   type Mutation {
     startOrchard(orchardId: ID!): [Task!]!
@@ -43,13 +43,18 @@ const rootValue = {
     check(orchardId);
     const sql = db();
     const examples = JSON.stringify(
-      EXAMPLES.map((item) => ({ species: item.species, ...item.english, spanish: item.spanish })),
+      EXAMPLES.map((item) => ({
+        species: item.species,
+        ...item.english,
+        spanish: item.spanish,
+        german: item.german,
+      })),
     );
     // Create the workspace and its examples atomically, including concurrent first loads.
     await sql`WITH new_orchard AS (INSERT INTO orchards (id) VALUES (${orchardId}) ON CONFLICT DO NOTHING RETURNING id)
-      INSERT INTO tasks (orchard_id, species, title, location, materials_location, done_when, spanish)
-      SELECT new_orchard.id, example.species, example.title, example.location, example."materialsLocation", example."doneWhen", example.spanish
-      FROM new_orchard CROSS JOIN jsonb_to_recordset(${examples}::jsonb) AS example(species text, title text, location text, "materialsLocation" text, "doneWhen" text, spanish jsonb)`;
+      INSERT INTO tasks (orchard_id, species, title, location, materials_location, done_when, spanish, german)
+      SELECT new_orchard.id, example.species, example.title, example.location, example."materialsLocation", example."doneWhen", example.spanish, example.german
+      FROM new_orchard CROSS JOIN jsonb_to_recordset(${examples}::jsonb) AS example(species text, title text, location text, "materialsLocation" text, "doneWhen" text, spanish jsonb, german jsonb)`;
     return tasks({ orchardId });
   },
   async saveTask({
@@ -61,16 +66,21 @@ const rootValue = {
     orchardId: string;
     taskId?: string;
     revision?: number;
-    input: { species: string; english: Instructions; spanish?: Instructions };
+    input: {
+      species: string;
+      english: Instructions;
+      spanish?: Instructions;
+      german?: Instructions;
+    };
   }) {
     check(orchardId, taskId);
-    const { species, english: en, spanish } = validateWorkInput(input);
+    const { species, english: en, spanish, german } = validateWorkInput(input);
     const sql = db();
     let rows;
     if (taskId) {
       if (!Number.isInteger(revision)) throw new Error('Reload the task before saving.');
       rows =
-        await sql`UPDATE tasks SET species = ${species}, title = ${en.title}, location = ${en.location}, materials_location = ${en.materialsLocation}, done_when = ${en.doneWhen}, spanish = ${spanish ? JSON.stringify(spanish) : null}::jsonb, revision = revision + 1
+        await sql`UPDATE tasks SET species = ${species}, title = ${en.title}, location = ${en.location}, materials_location = ${en.materialsLocation}, done_when = ${en.doneWhen}, spanish = ${spanish ? JSON.stringify(spanish) : null}::jsonb, german = ${german ? JSON.stringify(german) : null}::jsonb, revision = revision + 1
         WHERE orchard_id = ${orchardId} AND id = ${taskId}::bigint AND revision = ${revision} RETURNING *`;
       if (!rows.length)
         throw new Error(
@@ -78,8 +88,8 @@ const rootValue = {
         );
     } else {
       rows =
-        await sql`INSERT INTO tasks (orchard_id, species, title, location, materials_location, done_when, spanish)
-        SELECT ${orchardId}, ${species}, ${en.title}, ${en.location}, ${en.materialsLocation}, ${en.doneWhen}, ${spanish ? JSON.stringify(spanish) : null}::jsonb
+        await sql`INSERT INTO tasks (orchard_id, species, title, location, materials_location, done_when, spanish, german)
+        SELECT ${orchardId}, ${species}, ${en.title}, ${en.location}, ${en.materialsLocation}, ${en.doneWhen}, ${spanish ? JSON.stringify(spanish) : null}::jsonb, ${german ? JSON.stringify(german) : null}::jsonb
         FROM orchards WHERE id = ${orchardId} AND (SELECT count(*) FROM tasks WHERE orchard_id = ${orchardId}) < 20 RETURNING *`;
       if (!rows.length)
         throw new Error('This demo holds up to 20 tasks, or the workspace could not be found.');
