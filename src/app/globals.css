@@ -1,3 +1,17 @@
+@import 'tailwindcss';
+
+@theme inline {
+  --color-canvas: var(--paper);
+  --color-surface: var(--surface);
+  --color-ink: var(--ink);
+  --color-muted: var(--muted);
+  --color-line: var(--line);
+  --color-primary: var(--green);
+  --color-focus: var(--focus);
+  --font-ui: 'DM Sans', system-ui, sans-serif;
+  --font-display: 'Libre Caslon Display', Georgia, serif;
+}
+
 :root {
   --paper: #f7f7f0;
   --surface: #fffef9;
@@ -9,6 +23,7 @@
   --amber: #805320;
   --radius: 16px;
   --shadow: 0 4px 20px #223a2b05;
+  --focus: #a86e28;
   color-scheme: light;
 }
 * {
@@ -23,7 +38,7 @@ body {
   background: var(--paper);
   color: var(--ink);
   font-family: 'DM Sans', system-ui, sans-serif;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.6;
 }
 button,
@@ -46,6 +61,9 @@ a {
 button {
   cursor: pointer;
 }
+.ui-button {
+  min-height: 44px;
+}
 button:disabled {
   cursor: not-allowed;
   opacity: 0.5;
@@ -59,7 +77,7 @@ input:focus-visible,
 textarea:focus-visible,
 select:focus-visible,
 summary:focus-visible {
-  outline: 3px solid #a86e28;
+  outline: 3px solid var(--focus);
   outline-offset: 4px;
 }
 button {
@@ -104,10 +122,10 @@ small {
 }
 .muted {
   color: var(--muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 .eyebrow {
-  font-size: 10px;
+  font-size: 12px;
   letter-spacing: 0.16em;
   font-weight: 700;
   margin-bottom: 10px;
@@ -249,7 +267,7 @@ small {
   background: #edf0e5;
   border: 1px solid #dfe4d4;
   border-radius: 9px;
-  font-size: 12px;
+  font-size: 14px;
   color: #53664c;
   margin-bottom: 28px;
 }
@@ -316,7 +334,7 @@ small {
   font-weight: 400;
 }
 .overview span {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
 }
 .overview button:hover {
@@ -364,7 +382,7 @@ progress::-webkit-progress-value {
   padding: 8px 12px;
   min-height: 44px;
   border-radius: 7px;
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 500;
 }
 .filters .selected {
@@ -451,7 +469,7 @@ progress::-webkit-progress-value {
 }
 .task-details dt {
   color: #687660;
-  font-size: 10px;
+  font-size: 12px;
   text-transform: uppercase;
   font-weight: 650;
   letter-spacing: 0.09em;
@@ -459,7 +477,7 @@ progress::-webkit-progress-value {
 }
 .task-details dd {
   margin: 0;
-  font-size: 13px;
+  font-size: 15px;
   line-height: 1.6;
   overflow-wrap: anywhere;
 }
@@ -471,12 +489,12 @@ progress::-webkit-progress-value {
   padding-top: 15px;
   margin-top: 22px;
   color: #68735f;
-  font-size: 11px;
+  font-size: 13px;
   flex-wrap: wrap;
 }
 .task-audio small {
   display: block;
-  font-size: 10px;
+  font-size: 12px;
   color: #5e6b61;
   margin-top: 2px;
 }
@@ -587,7 +605,7 @@ progress::-webkit-progress-value {
   background: none;
   color: var(--muted);
   padding: 12px 0 15px;
-  font-size: 13px;
+  font-size: 14px;
   display: flex;
   align-items: center;
   gap: 9px;
@@ -691,7 +709,7 @@ input[type='checkbox'] {
 }
 .translation-grid {
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
   gap: 24px;
 }
 .translation-grid.single {
@@ -729,7 +747,7 @@ input[type='checkbox'] {
   overflow-wrap: anywhere;
 }
 .preview-notice {
-  font-size: 12px;
+  font-size: 14px;
   color: var(--muted);
   margin: 14px 0;
 }
@@ -788,7 +806,7 @@ input[type='checkbox'] {
 .empty-state p {
   color: var(--muted);
   margin-top: 10px;
-  font-size: 13px;
+  font-size: 14px;
 }
 .empty-state > span {
   font-size: 30px;
@@ -1068,4 +1086,15 @@ footer a {
   width: 100%;
   max-width: 480px;
   margin-top: 15px;
+}
+
+.recording-actions {
+  display: grid;
+  gap: 8px;
+  margin: 12px 0;
+}
+.recording-actions small {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
 }
