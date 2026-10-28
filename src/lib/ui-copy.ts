@@ -1,11 +1,15 @@
 import type { Language } from './work-order';
 
 const messages = {
-  createRecording: { en: 'Create recording', es: 'Crear grabación', de: 'Aufnahme erstellen' },
+  createRecording: {
+    en: 'Create recordings in all languages',
+    es: 'Crear grabaciones en todos los idiomas',
+    de: 'Aufnahmen in allen Sprachen erstellen',
+  },
   creatingRecording: {
-    en: 'Creating recording…',
-    es: 'Creando grabación…',
-    de: 'Aufnahme wird erstellt…',
+    en: 'Preparing all three languages…',
+    es: 'Preparando los tres idiomas…',
+    de: 'Alle drei Sprachen werden vorbereitet…',
   },
   recordingLimit: {
     en: 'New recordings are unavailable right now. You can still listen to existing recordings.',
@@ -16,6 +20,11 @@ const messages = {
     en: 'These instructions are too long to record. Shorten them in Plan work and try again.',
     es: 'Las instrucciones son demasiado largas para grabarlas. Acórtalas en Planificar trabajo e inténtalo de nuevo.',
     de: 'Diese Anweisungen sind zu lang für eine Aufnahme. Kürze sie unter „Arbeit planen“ und versuche es erneut.',
+  },
+  recordingTranslations: {
+    en: 'Add English, Spanish and German instructions in Plan work before creating recordings.',
+    es: 'Añade las instrucciones en inglés, español y alemán en Planificar trabajo antes de crear las grabaciones.',
+    de: 'Ergänze unter „Arbeit planen“ die Anweisungen auf Englisch, Spanisch und Deutsch, bevor du Aufnahmen erstellst.',
   },
   recordingFailed: {
     en: 'Couldn’t create this recording. Please try again later.',

@@ -277,23 +277,88 @@ test('recording is explicit, quota feedback is clear, and saved playback needs n
       await route.fulfill({ status: 429, json: { error: 'Allowance reached' } });
     else {
       cached = true;
-      await route.fulfill({ contentType: 'audio/wav', body: wav });
+      await route.fulfill({
+        contentType: 'audio/wav',
+        body: wav,
+        headers: { 'X-Recordings-Complete': 'true' },
+      });
     }
   });
   await page.route('**/api/task-audio', async (route) => {
-    if (cached) await route.fulfill({ contentType: 'audio/wav', body: wav });
+    if (cached)
+      await route.fulfill({
+        contentType: 'audio/wav',
+        body: wav,
+        headers: { 'X-Recordings-Complete': 'true' },
+      });
     else await route.fulfill({ json: { available: false } });
   });
   const card = page.getByRole('article', { name: EXAMPLES[0].english.title });
   expect(generations).toBe(0);
-  await card.getByRole('button', { name: 'Create recording', exact: true }).click();
+  await card
+    .getByRole('button', { name: 'Create recordings in all languages', exact: true })
+    .click();
   await expect(card.getByRole('alert')).toContainText('Shorten them in Plan work');
-  await card.getByRole('button', { name: 'Create recording', exact: true }).click();
+  await card
+    .getByRole('button', { name: 'Create recordings in all languages', exact: true })
+    .click();
   await expect(card.getByRole('alert')).toContainText('New recordings are unavailable right now');
-  await card.getByRole('button', { name: 'Create recording', exact: true }).click();
+  await card
+    .getByRole('button', { name: 'Create recordings in all languages', exact: true })
+    .click();
   await expect(card.locator('audio')).toBeVisible();
-  await expect(card.getByRole('button', { name: 'Create recording' })).toHaveCount(0);
+  await expect(
+    card.getByRole('button', { name: 'Create recordings in all languages' }),
+  ).toHaveCount(0);
   await page.reload();
   await expect(card.locator('audio')).toBeVisible();
+  await page.getByRole('button', { name: 'Today’s tasks', exact: true }).click();
+  for (const language of ['Español', 'Deutsch', 'English']) {
+    await page.getByRole('button', { name: language, exact: true }).click();
+    await expect(page.locator('audio').first()).toBeVisible();
+  }
   expect(generations).toBe(3);
+});
+
+test('existing English audio can prepare the other languages in one action', async ({ page }) => {
+  test.setTimeout(90000);
+  await mockWorkspace(page);
+  let complete = false;
+  let generations = 0;
+  const wav = Buffer.from('UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAIA+AAACABAAZGF0YQAAAAA=', 'base64');
+  await page.route('**/api/task-audio', async (route) => {
+    const { language } = route.request().postDataJSON();
+    if (language === 'en' || complete)
+      await route.fulfill({
+        contentType: 'audio/wav',
+        body: wav,
+        headers: { 'X-Recordings-Complete': String(complete) },
+      });
+    else await route.fulfill({ json: { available: false, complete: false } });
+  });
+  await page.route('**/api/task-audio/create', async (route) => {
+    generations++;
+    complete = true;
+    await route.fulfill({
+      contentType: 'audio/wav',
+      body: wav,
+      headers: { 'X-Recordings-Complete': 'true' },
+    });
+  });
+  await page.reload();
+  const card = page.getByRole('article', { name: EXAMPLES[0].english.title });
+  await expect(card.locator('audio')).toBeVisible();
+  await card.getByRole('button', { name: 'Create recordings in all languages' }).click();
+  await expect(
+    card.getByRole('button', { name: 'Create recordings in all languages' }),
+  ).toHaveCount(0);
+  await page.getByRole('button', { name: 'Today’s tasks', exact: true }).click();
+  for (const [language, title] of [
+    ['Español', EXAMPLES[0].spanish.title],
+    ['Deutsch', EXAMPLES[0].german.title],
+  ]) {
+    await page.getByRole('button', { name: language, exact: true }).click();
+    await expect(page.getByRole('article', { name: title }).locator('audio')).toBeVisible();
+  }
+  expect(generations).toBe(1);
 });

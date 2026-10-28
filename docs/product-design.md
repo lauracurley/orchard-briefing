@@ -4,7 +4,7 @@
 
 In Plan work, prepare a task, review English and optional Spanish and German instructions, and publish. In Today’s tasks, see where to go, what materials to bring and what finished means, then start, finish or report a problem. Progress appears in both views.
 
-The text workflow requires no provider calls. An explicit Create recording action creates reusable speech within a small shared budget. Prepared examples are labeled as examples. Custom notes require manual review and translation. Voice recording controls remain absent until the supported capture integration is ready.
+The text workflow requires no provider calls. An explicit Create recordings in all languages action prepares English, Spanish and German speech together within a small shared budget. Existing recordings are reused. Prepared examples are labeled as examples. Custom notes require manual review and translation. Voice recording controls remain absent until the supported capture integration is ready.
 
 ## Design references
 

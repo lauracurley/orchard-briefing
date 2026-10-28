@@ -35,19 +35,21 @@ export default function TaskCard({
   const [helpOpen, setHelpOpen] = useState(false);
   const [helpNote, setHelpNote] = useState('');
   const [audio, setAudio] = useState<string | null>(null);
+  const [complete, setComplete] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generationError, setGenerationError] = useState<
-    'limit' | 'changed' | 'tooLong' | 'failed' | null
+    'limit' | 'changed' | 'tooLong' | 'translations' | 'failed' | null
   >(null);
   const audioUrl = useRef<string | null>(null);
   const version = useRef(0);
   useEffect(() => {
-    ++version.current;
+    const lookupVersion = ++version.current;
     setGenerating(false);
     setGenerationError(null);
     let active = true;
     const controller = new AbortController();
     setAudio(null);
+    setComplete(false);
     if (details)
       fetch('/api/task-audio', {
         method: 'POST',
@@ -57,9 +59,11 @@ export default function TaskCard({
       })
         .then(async (response) => {
           if (!response.ok) throw new Error('Audio unavailable');
+          if (active && lookupVersion === version.current)
+            setComplete(response.headers.get('X-Recordings-Complete') === 'true');
           if (response.headers.get('Content-Type')?.includes('audio/')) {
             const url = URL.createObjectURL(await response.blob());
-            if (active) {
+            if (active && lookupVersion === version.current) {
               audioUrl.current = url;
               setAudio(url);
             } else URL.revokeObjectURL(url);
@@ -77,7 +81,7 @@ export default function TaskCard({
     };
   }, [orchardId, task.id, task.revision, language, !!details]);
   async function createRecording() {
-    const requestedVersion = version.current;
+    const requestedVersion = ++version.current;
     setGenerating(true);
     setGenerationError(null);
     try {
@@ -94,11 +98,13 @@ export default function TaskCard({
         setGenerationError(
           response.status === 422 && error?.code === 'instructions_too_long'
             ? 'tooLong'
-            : response.status === 429
-              ? 'limit'
-              : response.status === 409
-                ? 'changed'
-                : 'failed',
+            : response.status === 422 && error?.code === 'translations_required'
+              ? 'translations'
+              : response.status === 429
+                ? 'limit'
+                : response.status === 409
+                  ? 'changed'
+                  : 'failed',
         );
         return;
       }
@@ -107,6 +113,7 @@ export default function TaskCard({
       if (audioUrl.current) URL.revokeObjectURL(audioUrl.current);
       audioUrl.current = URL.createObjectURL(blob);
       setAudio(audioUrl.current);
+      setComplete(true);
     } catch {
       if (requestedVersion === version.current) setGenerationError('failed');
     } finally {
@@ -177,7 +184,7 @@ export default function TaskCard({
           <audio key={audio} controls src={audio} aria-label={copy.recordedInstructions} />
         </div>
       )}
-      {!audio && details && (
+      {!complete && details && (
         <div className="recording-actions">
           <Button className="secondary" onClick={createRecording} disabled={generating || busy}>
             <Volume2 size={16} aria-hidden="true" />{' '}
@@ -191,7 +198,9 @@ export default function TaskCard({
                   ? copy.recordingChanged
                   : generationError === 'tooLong'
                     ? copy.recordingTooLong
-                    : copy.recordingFailed}
+                    : generationError === 'translations'
+                      ? copy.recordingTranslations
+                      : copy.recordingFailed}
             </p>
           )}
         </div>

@@ -22,10 +22,10 @@ Start from native HTML for form elements and disclosure. Use Tailwind utilities 
 
 ## Copy examples
 
-| Need | Use |
-| --- | --- |
-| Planning heading | “Prepare today’s work” |
-| Task-list heading | “Today’s tasks” / “Tareas de hoy” |
-| Empty filter | “No tasks match this filter. Choose All tasks to see the full list.” |
-| Failed save | “Couldn’t save the update. Refresh the list and try again.” |
-| Audio action | “Create recording” / “Crear grabación” / “Aufnahme erstellen” |
+| Need              | Use                                                                                                                       |
+| ----------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| Planning heading  | “Prepare today’s work”                                                                                                    |
+| Task-list heading | “Today’s tasks” / “Tareas de hoy”                                                                                         |
+| Empty filter      | “No tasks match this filter. Choose All tasks to see the full list.”                                                      |
+| Failed save       | “Couldn’t save the update. Refresh the list and try again.”                                                               |
+| Audio action      | “Create recordings in all languages” / “Crear grabaciones en todos los idiomas” / “Aufnahmen in allen Sprachen erstellen” |
